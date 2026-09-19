@@ -9,7 +9,7 @@
  */
 import '../env';
 
-import { getDb } from './index';
+import { openDb } from './index';
 import { migrate } from './migrate';
 
 type Check = { name: string; run: () => void };
@@ -40,10 +40,15 @@ function mustAccept(name: string, fn: () => void) {
 }
 
 function main() {
-  migrate();
-  const db = getDb();
+  // 建一个临时库来撞，不碰真实库。
+  //
+  // 约束是**表结构的性质**，跟店里有什么数据无关。早先这里跑在真实库上（靠事务回滚
+  // 不留垃圾），但夹具用的是写死的名字和 id：店里只要真有个客户叫老王，
+  // 验证脚本就直接崩在 UNIQUE 上 —— 约束明明是好的，却报成了失败。
+  const db = openDb(':memory:');
+  migrate(db);
 
-  // 全程在一个事务里跑，最后回滚 —— 不往真实库里留垃圾
+  // 仍然包一层事务：一条检查污染了下一条，失败原因会指向错的地方
   db.exec('BEGIN');
 
   try {

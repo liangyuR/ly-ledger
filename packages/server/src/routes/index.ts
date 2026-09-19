@@ -24,12 +24,18 @@ import {
   exportStale,
 } from '../services/excel';
 import {
+  costUnknownAlert,
   dailyTrend,
   inventorySummary,
   monthlyTrend,
   productRanking,
   staleProducts,
 } from '../services/profit-reports';
+import {
+  dismissOnboarding,
+  onboardingState,
+  skipOpeningStock,
+} from '../services/onboarding';
 import { dashboard, frequentProducts, listDebts, today } from '../services/reports';
 import { listSales, saleDetail } from '../services/sale-detail';
 import { importSeedBrands, listSeedBrands } from '../services/seed-import';
@@ -328,6 +334,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
         profit: centsToYuan(r.profitCents),
         profitCents: r.profitCents,
         margin: r.marginPermille == null ? null : (r.marginPermille / 10).toFixed(1),
+        costUnknown: r.costUnknown,
       })),
       stale: staleProducts(db).map((s) => ({
         productId: s.productId,
@@ -342,6 +349,15 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
         skuCount: inv.skuCount,
         negativeCount: inv.negativeCount,
       },
+      // 没进过货就卖掉的那部分，毛利等于全额售价，虚高。必须说出来
+      costUnknown: (() => {
+        const a = costUnknownAlert(db, month);
+        return {
+          productCount: a.productCount,
+          revenue: centsToYuan(a.revenueCents),
+          names: a.names,
+        };
+      })(),
     };
   });
 
@@ -614,6 +630,61 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // ── 库存 ────────────────────────────────────────────────
+  // ── 启用向导 ─────────────────────────────────────────────
+  // 完成标准是"卖出第一笔"，不是"把表填完"。进度一律现算，不落库 ——
+  // 老板绕开向导自己把事做了，清单还在催他，比不做向导更糟（onboarding.ts）
+
+  app.get('/api/onboarding', async () => {
+    return { ok: true, ...onboardingState(getDb()) };
+  });
+
+  app.post<{ Body: { on?: boolean } }>('/api/onboarding/dismiss', async (req) => {
+    dismissOnboarding(getDb(), req.body?.on ?? true);
+    return { ok: true, ...onboardingState(getDb()) };
+  });
+
+  app.post('/api/onboarding/skip-stock', async () => {
+    skipOpeningStock(getDb(), true);
+    return { ok: true, ...onboardingState(getDb()) };
+  });
+
+  /**
+   * 期初库存。
+   *
+   * 本质就是一张进货单，note 写「期初」——**不是**特殊单据类型。
+   * 走同一套加权成本、同一套改单作废，一行特殊逻辑都不用写（docs/05）。
+   */
+  app.post<{
+    Body: {
+      bizDate?: string;
+      items?: { productId: number; unit: 'base' | 'pack'; qty: string; unitCostYuan: string }[];
+    };
+  }>('/api/onboarding/opening-stock', async (req) => {
+    const db = getDb();
+    const items = (req.body?.items ?? []).filter(
+      (i) => i && Number(i.productId) > 0 && String(i.qty).trim() !== '' && String(i.unitCostYuan).trim() !== '',
+    );
+    if (items.length === 0) {
+      throw new Error('一样都没填。要是现在不想录，点"跳过"就行');
+    }
+
+    const r = receive(db, {
+      bizDate: req.body?.bizDate ?? today(db),
+      note: '期初库存',
+      items,
+    });
+
+    // 录了就不算跳过了
+    skipOpeningStock(db, false);
+
+    return {
+      ok: true,
+      purchaseId: r.purchaseId,
+      total: centsToYuan(r.totalCents),
+      warnings: r.warnings,
+    };
+  });
+
   app.get<{ Params: { id: string } }>('/api/products/:id/stock', async (req) => {
     const db = getDb();
     const row = db

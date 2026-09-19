@@ -84,6 +84,12 @@ export interface ProductProfit {
   profitCents: number;
   /** 毛利率，千分比。成本为零时为 null，不硬算 */
   marginPermille: number | null;
+  /**
+   * 这个商品本月有成本为 0 的销售行 —— 卖的是没进过货的存货，
+   * 软件不知道进价，毛利等于全额售价，数字是虚高的。
+   * 界面必须标出来：不标的话老板会拿着假毛利做进货决策（docs/01 红线 5 的推论）。
+   */
+  costUnknown: boolean;
 }
 
 /** 单品毛利排行。按毛利额排 —— 卖得多不等于赚得多 */
@@ -94,7 +100,8 @@ export function productRanking(db: Database, month?: string, limit = 20): Produc
       `SELECT si.product_id AS productId, p.name,
               SUM(si.qty_base_milli) AS qtyBaseMilli,
               SUM(si.amount_cents) AS revenueCents,
-              SUM(si.amount_cents - si.cost_amount_cents) AS profitCents
+              SUM(si.amount_cents - si.cost_amount_cents) AS profitCents,
+              MAX(CASE WHEN si.unit_cost_base_e4 = 0 THEN 1 ELSE 0 END) AS costUnknownFlag
          FROM sale_items si
          JOIN sales s ON s.id = si.sale_id
          JOIN products p ON p.id = si.product_id
@@ -103,13 +110,58 @@ export function productRanking(db: Database, month?: string, limit = 20): Produc
         ORDER BY profitCents DESC
         LIMIT ?`,
     )
-    .all(m, limit) as Omit<ProductProfit, 'marginPermille'>[];
+    .all(m, limit) as (Omit<ProductProfit, 'marginPermille' | 'costUnknown'> & {
+    costUnknownFlag: number;
+  })[];
 
-  return rows.map((r) => ({
+  return rows.map(({ costUnknownFlag, ...r }) => ({
     ...r,
     marginPermille:
       r.revenueCents === 0 ? null : divRound(BigInt(r.profitCents) * 1000n, BigInt(r.revenueCents)),
+    costUnknown: costUnknownFlag === 1,
   }));
+}
+
+export interface CostUnknownAlert {
+  /** 有多少个商品卖的是不知道进价的货 */
+  productCount: number;
+  /** 这些行的销售额 —— 毛利虚高的正是这个数 */
+  revenueCents: number;
+  /** 前几个名字，界面上直接点名 */
+  names: string[];
+}
+
+/**
+ * 本月有多少毛利是假的。
+ *
+ * 从没进过货的商品，成本快照是 0，卖 550 就记赚 550。这不是 bug ——
+ * 加权平均成本在没有进货记录时本来就是 0，且下次进货就会自动校正。
+ * 但**报表上必须说出来**，否则老板会拿着虚高的毛利做决策。
+ *
+ * 启用向导跳过"期初库存"那一步，就会进入这个状态，所以这是向导的配套。
+ */
+export function costUnknownAlert(db: Database, month?: string): CostUnknownAlert {
+  const m = month ?? today(db).slice(0, 7);
+  const rows = db
+    .prepare(
+      `SELECT p.name, SUM(si.amount_cents) AS revenueCents
+         FROM sale_items si
+         JOIN sales s ON s.id = si.sale_id
+         JOIN products p ON p.id = si.product_id
+        WHERE s.voided_at IS NULL
+          AND substr(s.biz_date, 1, 7) = ?
+          AND si.unit_cost_base_e4 = 0
+          AND si.amount_cents > 0
+        GROUP BY si.product_id
+        ORDER BY revenueCents DESC`,
+    )
+    .all(m) as { name: string; revenueCents: number }[];
+
+  return {
+    productCount: rows.length,
+    revenueCents: rows.reduce((s2, r) => s2 + r.revenueCents, 0),
+    names: rows.slice(0, 5).map((r) => r.name),
+  };
 }
 
 export interface StaleProduct {

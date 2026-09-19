@@ -2,7 +2,7 @@
   "name": "ly-ledger",
   "version": "0.1.0",
   "private": true,
-  "description": "烟酒店进销存台账 —— NocoBase 后端 + 自研极简前端，本地单机运行",
+  "description": "烟酒店进销存台账 —— Fastify + SQLite + React，本地单机运行",
   "engines": {
     "node": ">=20"
   },

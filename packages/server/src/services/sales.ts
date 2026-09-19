@@ -50,6 +50,29 @@ export interface CheckoutOptions {
   rev?: number;
 }
 
+/**
+ * 售价回写：这次卖多少，下次就默认多少。
+ *
+ * 不回写的话，没填过价的商品每卖一次都得重输一遍 —— 启用向导明说了
+ * "卖到时当场填一个，软件会记住"，不回写那句话就是假的。
+ *
+ * **让利要走抹零，不要改单价。** 单价改了就是真改价，会被记住；
+ * 抹零是这一单的事，不动商品。两者分开正是 discount_amount_cents 的用途。
+ */
+function writeBackPrice(
+  db: Database,
+  productId: number,
+  unit: 'base' | 'pack',
+  priceCents: number,
+): void {
+  const col = unit === 'pack' ? 'price_pack_cents' : 'price_base_cents';
+  db.prepare(
+    `UPDATE products
+        SET ${col} = ?, updated_at = datetime('now')
+      WHERE id = ? AND (${col} IS NULL OR ${col} <> ?)`,
+  ).run(priceCents, productId, priceCents);
+}
+
 export interface CheckoutResult {
   saleId: number;
   totalCents: number;
@@ -171,6 +194,8 @@ export function checkout(db: Database, raw: unknown, opts: CheckoutOptions = {})
         refType: 'sale',
         refId: saleId,
       });
+
+      writeBackPrice(db, l.productId, l.unit, l.unitPriceCents);
     }
 
     let paymentId: number | null = null;

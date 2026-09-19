@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { api, endpoints, type Product } from '../api/client';
+import FirstSaleHint from '../components/FirstSaleHint';
 import { Card } from '../components/Card';
 import { useHotkeys } from '../hooks/useHotkeys';
 import { centsToYuan, formatYuan, lineAmountCents, yuanToCents } from '../money';
@@ -215,6 +216,10 @@ export default function Sell() {
       setPartialAmount('');
       qc.invalidateQueries({ queryKey: ['frequent'] });
       qc.invalidateQueries({ queryKey: ['dashboard'] });
+      // 卖成第一笔，上手提示当场消失 —— 拖到下次刷新，老板会以为没生效
+      qc.invalidateQueries({ queryKey: ['onboarding'] });
+      // 成交价回写到了商品上，搜索结果里的默认价要跟着变
+      qc.invalidateQueries({ queryKey: ['products'] });
       backToSearch();
     },
     onError: (e) => setFlash({ tone: 'bad', text: (e as Error).message }),
@@ -331,6 +336,8 @@ export default function Sell() {
 
   return (
     <div className="flex min-h-0 grow flex-col gap-5">
+      <FirstSaleHint />
+
       <div className="flex shrink-0 items-center gap-4">
         <h1 className="m-0 text-2xl font-semibold">卖货</h1>
         <span className="grow" />

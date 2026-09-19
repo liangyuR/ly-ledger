@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
 import BackupCard from '../components/BackupCard';
 import { Card, Figure } from '../components/Card';
+import OnboardingChecklist from '../components/OnboardingChecklist';
 
 interface Dashboard {
   date: string;
@@ -84,6 +85,8 @@ export default function Dashboard() {
 
   return (
     <>
+      <OnboardingChecklist />
+
       <div className="flex shrink-0 gap-5">
         <Figure label="今日营业额" value={`¥${d?.todayRevenue ?? '—'}`} sub={d?.date} />
         <Figure label="今日毛利" value={`¥${d?.todayProfit ?? '—'}`} tone="brand" />

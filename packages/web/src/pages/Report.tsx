@@ -15,6 +15,8 @@ interface Profit {
     profit: string;
     profitCents: number;
     margin: string | null;
+    /** 这个商品有没进过货就卖掉的行，毛利虚高 */
+    costUnknown: boolean;
   }[];
   stale: {
     productId: number;
@@ -25,6 +27,7 @@ interface Profit {
     idleDays: number | null;
   }[];
   inventory: { totalValue: string; skuCount: number; negativeCount: number };
+  costUnknown: { productCount: number; revenue: string; names: string[] };
 }
 
 type Tab = 'trend' | 'ranking' | 'stale';
@@ -154,6 +157,20 @@ export default function Report() {
         />
       </div>
 
+      {(d?.costUnknown.productCount ?? 0) > 0 && (
+        <div className="shrink-0 rounded-2xl bg-danger-50 px-7 py-5 text-[18px] leading-relaxed text-ink-2">
+          <strong className="font-semibold text-danger">这个月的毛利偏高，不能当真。</strong>
+          {' '}有 <span className="num">{d?.costUnknown.productCount}</span> 个商品是没进过货就卖掉的，
+          软件不知道你当初花多少钱进的，这部分毛利按全额售价算了，涉及销售额{' '}
+          <span className="num font-semibold">¥{d?.costUnknown.revenue}</span>。
+          <div className="mt-2 text-[17px]">
+            {d?.costUnknown.names.join('、')}
+            {(d?.costUnknown.productCount ?? 0) > (d?.costUnknown.names.length ?? 0) && ' 等'}
+            {' '}—— 这些商品下次进货时，成本就自动校正了，不用手工改。
+          </div>
+        </div>
+      )}
+
       <div className="min-h-0 grow overflow-auto">
         {tab === 'trend' && (
           <Card
@@ -183,7 +200,13 @@ export default function Report() {
             {(d?.ranking.length ?? 0) === 0 && <div className="text-[17px] text-muted">本月还没有销售</div>}
             {d?.ranking.map((r) => (
               <div key={r.productId} className="flex h-14 items-center gap-4 border-t border-line">
-                <span className="w-44 text-[18px]">{r.name}</span>
+                <span className="w-44 truncate text-[18px]">{r.name}</span>
+                {/* 虚高的毛利要逐行标，不能只在顶上说一句 —— 老板看的是这一行 */}
+                <span
+                  className={`w-20 shrink-0 text-[15px] ${r.costUnknown ? 'text-danger' : 'text-transparent'}`}
+                >
+                  {r.costUnknown ? '成本未知' : ''}
+                </span>
                 <span className="num w-24 text-[16px] text-ink-2">{r.qty}</span>
                 <div className="h-4.5 grow overflow-hidden rounded bg-page">
                   <div
