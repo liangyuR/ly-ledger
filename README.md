@@ -27,7 +27,7 @@
 ## 技术栈
 
 - **后端**：Fastify + better-sqlite3 + Zod
-- **前端**：Vite + React 18 + TypeScript + Tailwind CSS + TanStack Query
+- **前端**：Vite + React 19 + TypeScript + Tailwind CSS 4 + TanStack Query
 - **字体**：思源黑体 Noto Sans SC + IBM Plex Mono，**随包发布，不走 CDN**
 - **数据库**：SQLite（单文件，备份 = 复制文件）
 - **运行**：便携版 Node + nssm 注册 Windows 服务，Edge `--app` 模式作桌面入口
@@ -54,6 +54,8 @@ npm start
 | `npm test` | 单测 + 端到端（54 项），用内存库，不碰真实数据 |
 | `npm run verify:model` | **拿真数据撞一遍数据模型的约束**，全程事务、跑完回滚 |
 | `npm run typecheck` | 类型检查 |
+| `npm run web:dev` | 前端开发服务（热重载，接口转发到后端） |
+| `npm run web:build` | 构建前端产物，后端启动时会自动托管 |
 
 数据库是单文件 `packages/server/data/ledger.db`。想推倒重来就删掉它再启动一次。
 
@@ -107,7 +109,7 @@ UI 设计稿（11 块画板，1920×1080）：**https://claude.ai/artifact/NJ9eA
 | M1.5 | ✅ 商品入库三条路：预置目录按品牌勾选 · 手工清单批量导入 · 卖货页就地建 |
 | M2 | ✅ 正向事务 action：`sales/checkout` / `purchases/receive` / `payments/collect`，含成本算法与 FIFO 核销单测 |
 | M2.5 | ✅ **逆向 action**：作废 / 修改 / 退货 + 核销重算逃生舱 |
-| M3 | 前端骨架：Vite 工程、登录、路由、API 客户端、键盘流基础设施 |
+| M3 | ✅ 前端骨架：Vite 工程、路由、API 客户端、键盘流基础设施、字体随包 |
 | M4 | 核心四页：看板 / 卖货 / 进货 / 收款，含单据详情与改单 |
 | M5 | **备份与恢复**：每日自动备份、U 盘备份、状态告警、恢复说明 |
 | M6 | 利润报表：日月毛利、单品排行、滞销预警 + Excel 导出（明细/欠款/商品） |

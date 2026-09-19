@@ -13,9 +13,11 @@
     "migrate": "npm run migrate -w @ly-ledger/server",
     "start": "npm run start -w @ly-ledger/server",
     "dev": "npm run dev -w @ly-ledger/server",
-    "typecheck": "npm run typecheck -w @ly-ledger/server",
+    "typecheck": "npm run typecheck -w @ly-ledger/server && npm run typecheck -w @ly-ledger/web",
     "verify:model": "npm run verify:model -w @ly-ledger/server",
-    "test": "npm test -w @ly-ledger/server"
+    "test": "npm test -w @ly-ledger/server",
+    "web:dev": "npm run dev -w @ly-ledger/web",
+    "web:build": "npm run build -w @ly-ledger/web"
   },
   "license": "UNLICENSED"
 }
