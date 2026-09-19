@@ -1,7 +1,9 @@
 import Fastify, { type FastifyInstance } from 'fastify';
-import { getDb } from './db';
 
-export function buildApp(): FastifyInstance {
+import { getDb } from './db';
+import { registerRoutes } from './routes';
+
+export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
     logger: { level: process.env.LOG_LEVEL || 'info' },
   });
@@ -14,6 +16,8 @@ export function buildApp(): FastifyInstance {
       .get() as { n: number };
     return { ok: true, sqlite: v, tables: n };
   });
+
+  await registerRoutes(app);
 
   return app;
 }

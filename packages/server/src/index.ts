@@ -8,7 +8,7 @@ async function main() {
   // 升级覆盖 app 后第一次启动就得把表结构带上来。
   const { applied } = migrate();
 
-  const app = buildApp();
+  const app = await buildApp();
   if (applied.length) {
     app.log.info({ applied }, '已执行迁移');
   }

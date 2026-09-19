@@ -51,6 +51,7 @@ npm start
 | `npm start` | 启动服务 |
 | `npm run dev` | 带热重载启动 |
 | `npm run migrate` | 只跑迁移，打印当前表 |
+| `npm test` | 单测 + 端到端（54 项），用内存库，不碰真实数据 |
 | `npm run verify:model` | **拿真数据撞一遍数据模型的约束**，全程事务、跑完回滚 |
 | `npm run typecheck` | 类型检查 |
 
@@ -104,7 +105,7 @@ UI 设计稿（11 块画板，1920×1080）：**https://claude.ai/artifact/NJ9eA
 | M0 | ✅ 环境搭建，Fastify + SQLite 跑起来 |
 | M1 | ✅ 11 张表建表完成，约束（不变量）有验证脚本兜底 |
 | M1.5 | 商品入库三条路：预置目录按品牌勾选 · 手工清单/Excel 批量导入 · 卖货页即时新建 |
-| M2 | 正向事务 action：`sales:checkout` / `purchases:receive` / `payments:collect` |
+| M2 | ✅ 正向事务 action：`sales/checkout` / `purchases/receive` / `payments/collect`，含成本算法与 FIFO 核销单测 |
 | M2.5 | **逆向 action**：作废 / 修改 / 退货 + 核销重算。含成本算法与 FIFO 单测 |
 | M3 | 前端骨架：Vite 工程、登录、路由、API 客户端、键盘流基础设施 |
 | M4 | 核心四页：看板 / 卖货 / 进货 / 收款，含单据详情与改单 |

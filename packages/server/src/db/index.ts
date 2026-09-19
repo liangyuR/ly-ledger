@@ -4,21 +4,30 @@ import { dirname, isAbsolute, resolve } from 'node:path';
 
 let handle: Database.Database | null = null;
 
-/** 整个进程共用一个连接。单机单人，不需要连接池。 */
-export function getDb(): Database.Database {
-  if (handle) return handle;
+/** 打开一个连接并设好 pragma。测试用 ':memory:' 拿独立的库。 */
+export function openDb(file: string): Database.Database {
+  if (file !== ':memory:') {
+    const path = isAbsolute(file) ? file : resolve(process.cwd(), file);
+    mkdirSync(dirname(path), { recursive: true });
+    file = path;
+  }
 
-  const file = process.env.DB_FILE || 'data/ledger.db';
-  const path = isAbsolute(file) ? file : resolve(process.cwd(), file);
-  mkdirSync(dirname(path), { recursive: true });
-
-  handle = new Database(path);
-  handle.pragma('journal_mode = WAL');
-  handle.pragma('foreign_keys = ON');
+  const db = new Database(file);
+  db.pragma('journal_mode = WAL');
+  // SQLite 默认不开外键约束 —— 不开的话建表时写的 REFERENCES 形同虚设
+  db.pragma('foreign_keys = ON');
   // 这是台账不是缓存：断电安全性优先于写入速度。
   // 单人一天几十笔，FULL 带来的开销完全无感。
-  handle.pragma('synchronous = FULL');
+  db.pragma('synchronous = FULL');
 
+  return db;
+}
+
+/** 整个进程共用一个连接。单机单人，不需要连接池。 */
+export function getDb(): Database.Database {
+  if (!handle) {
+    handle = openDb(process.env.DB_FILE || 'data/ledger.db');
+  }
   return handle;
 }
 

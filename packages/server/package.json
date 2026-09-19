@@ -9,7 +9,8 @@
     "start": "tsx src/index.ts",
     "dev": "tsx watch src/index.ts",
     "typecheck": "tsc --noEmit",
-    "verify:model": "tsx src/db/verify-invariants.ts"
+    "verify:model": "tsx src/db/verify-invariants.ts",
+    "test": "node --import tsx --test \"src/**/*.test.ts\""
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3",

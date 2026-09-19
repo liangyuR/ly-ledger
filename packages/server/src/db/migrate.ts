@@ -1,3 +1,4 @@
+import type { Database } from 'better-sqlite3';
 import { readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { getDb } from './index';
@@ -16,8 +17,8 @@ export interface MigrateResult {
  * 幂等：反复执行结果一致。发版前必须在**有真实数据的库**上试跑过，
  * 空库迁移成功不说明任何问题（docs/03 迁移纪律）。
  */
-export function migrate(): MigrateResult {
-  const db = getDb();
+export function migrate(target?: Database): MigrateResult {
+  const db = target ?? getDb();
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS _migrations (
