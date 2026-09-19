@@ -104,7 +104,7 @@ UI 设计稿（11 块画板，1920×1080）：**https://claude.ai/artifact/NJ9eA
 |---|---|
 | M0 | ✅ 环境搭建，Fastify + SQLite 跑起来 |
 | M1 | ✅ 11 张表建表完成，约束（不变量）有验证脚本兜底 |
-| M1.5 | 商品入库三条路：预置目录按品牌勾选 · 手工清单/Excel 批量导入 · 卖货页即时新建 |
+| M1.5 | ✅ 商品入库三条路：预置目录按品牌勾选 · 手工清单批量导入 · 卖货页就地建 |
 | M2 | ✅ 正向事务 action：`sales/checkout` / `purchases/receive` / `payments/collect`，含成本算法与 FIFO 核销单测 |
 | M2.5 | ✅ **逆向 action**：作废 / 修改 / 退货 + 核销重算逃生舱 |
 | M3 | 前端骨架：Vite 工程、登录、路由、API 客户端、键盘流基础设施 |

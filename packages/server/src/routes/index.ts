@@ -6,7 +6,10 @@ import { centsToYuan, e4ToYuan, milliToQty, yuanToCents } from '../money';
 import { collect } from '../services/payments';
 import { receive } from '../services/purchases';
 import { checkout } from '../services/sales';
+import { toPinyin } from '../services/pinyin';
+import { importProductList, parseProductList } from '../services/product-import';
 import { rebuildAllocations, readDebt } from '../services/rebuild-allocations';
+import { importSeedBrands, listSeedBrands } from '../services/seed-import';
 import {
   returnSale,
   reviseSale,
@@ -75,6 +78,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     if (!b?.baseUnit?.trim()) throw new Error('基础单位不能为空');
 
     const db = getDb();
+    const py = toPinyin(b.name);
     // 同名即同商品 —— 整条卖和单包卖是一个商品的两种卖法，不是两条记录。
     // 建成两条会让库存裂成两份，且错得极隐蔽（docs/02）
     const dup = db.prepare('SELECT id FROM products WHERE name = ?').get(b.name.trim());
@@ -91,8 +95,9 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       )
       .run(
         b.name.trim(),
-        b.pinyinFull ?? '',
-        b.pinyinAbbr ?? '',
+        // 拼音自动生成，老板不用管。多音字可以事后手工改
+        b.pinyinFull ?? py.full,
+        b.pinyinAbbr ?? py.abbr,
         b.category ?? 'other',
         b.brand ?? '',
         b.spec ?? '',
@@ -105,6 +110,34 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 
     reply.status(201);
     return { ok: true, productId: Number(id) };
+  });
+
+  // ── 商品批量导入 ─────────────────────────────────────────
+  // 把商品弄进来的三条路：预置目录勾选、手工清单、卖货时就地建。
+  // 三条并行，缺一不可 —— 商品库不全不能阻塞记账（docs/01）
+
+  app.get('/api/seed/brands', async () => {
+    return { ok: true, brands: listSeedBrands(getDb()) };
+  });
+
+  app.post<{ Body: { brands?: string[] } }>('/api/seed/import', async (req) => {
+    const brands = req.body?.brands ?? [];
+    if (!Array.isArray(brands) || brands.length === 0) {
+      throw new Error('至少勾一个牌子。全量导入会让搜索跳出一堆你根本不卖的牌子');
+    }
+    const r = importSeedBrands(getDb(), brands);
+    return { ok: true, created: r.created, skipped: r.skipped };
+  });
+
+  /** 解析预览，不落库。看不懂的行标出来，允许就地改完再导 */
+  app.post<{ Body: { text?: string } }>('/api/products/parse-import', async (req) => {
+    const r = parseProductList(getDb(), req.body?.text ?? '');
+    return { ok: true, ...r };
+  });
+
+  app.post<{ Body: { text?: string; category?: string } }>('/api/products/import', async (req) => {
+    const r = importProductList(getDb(), req.body?.text ?? '', req.body?.category ?? 'other');
+    return { ok: true, created: r.created, skipped: r.skipped, invalid: r.invalid };
   });
 
   // ── 三个正向事务 action ──────────────────────────────────
