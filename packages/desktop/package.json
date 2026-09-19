@@ -1,0 +1,6 @@
+{
+  "name": "@ly-ledger/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "桌面外壳与 Rust 后端。工作区里挂一个空壳，只为让 tauri CLI 从仓库根找得到它"
+}

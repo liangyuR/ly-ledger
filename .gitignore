@@ -1,0 +1,31 @@
+# 依赖
+node_modules/
+.pnpm-store/
+
+# 构建产物
+dist/
+packages/web/dist/
+packages/desktop/target/
+*.tsbuildinfo
+
+# 数据与备份 —— 绝不入库
+data/
+backup/
+*.db
+*.db-shm
+*.db-wal
+
+# 日志
+logs/
+*.log
+npm-debug.log*
+
+# 编辑器 / 系统
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+
+# Tauri 生成的权限 schema，每次构建重出
+packages/desktop/gen/schemas/

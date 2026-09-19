@@ -1,0 +1,108 @@
+@import 'tailwindcss';
+
+/* 字体随包发布，不走 CDN —— 柜台电脑可能没网。
+   断网那天字体掉回默认，金额列就会参差不齐，而金额对齐是这套界面可读性的地基。
+
+   直接引整合好的中文单文件（1.1MB/字重），不要 fontsource 的默认入口 ——
+   那个入口把 101 个子集的 @font-face 全塞进来，打出 618 个字体文件、16MB。
+   只要 woff2，不要 woff 回退：目标浏览器是 Edge，它支持 woff2 已经很多年。 */
+
+@font-face {
+  font-family: 'Noto Sans SC';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('@fontsource/noto-sans-sc/files/noto-sans-sc-chinese-simplified-400-normal.woff2')
+    format('woff2');
+}
+@font-face {
+  font-family: 'Noto Sans SC';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('@fontsource/noto-sans-sc/files/noto-sans-sc-chinese-simplified-500-normal.woff2')
+    format('woff2');
+}
+@font-face {
+  font-family: 'Noto Sans SC';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('@fontsource/noto-sans-sc/files/noto-sans-sc-chinese-simplified-600-normal.woff2')
+    format('woff2');
+}
+
+/* 拉丁字母部分单独补上，中文子集不含它 */
+@import '@fontsource/noto-sans-sc/latin-400.css';
+@import '@fontsource/noto-sans-sc/latin-500.css';
+@import '@fontsource/noto-sans-sc/latin-600.css';
+
+/* 数字用等宽，只需要拉丁子集 */
+@import '@fontsource/ibm-plex-mono/latin-400.css';
+@import '@fontsource/ibm-plex-mono/latin-500.css';
+@import '@fontsource/ibm-plex-mono/latin-600.css';
+
+@theme {
+  /* 色只有三组：墨绿主操作、警示红只给真异常、其余灰阶。
+     红绿已过色盲校验（CVD ΔE 10.4），但红绿从不单独表意 ——
+     欠款带天数、负库存带文字、抹零带减号。 */
+  --color-ink: #1a1a17;
+  --color-ink-2: #6b6b63;
+  --color-muted: #9a9a90;
+  --color-line: #e4e3de;
+  --color-page: #f5f5f3;
+  --color-card: #ffffff;
+
+  --color-brand-900: #0b3d31; /* 深绿文字 */
+  --color-brand-700: #12604d; /* 主按钮填充，白字对比度 7.5:1 */
+  --color-brand-500: #1a8870; /* 图表色块，仅作填充不做小字 */
+  --color-brand-50: #e8f2ee; /* 选中态浅底 */
+
+  --color-danger: #b3261e;
+  --color-danger-50: #fbeae8;
+
+  --font-sans: 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+
+  /* 尺寸比常规大一号 —— 使用者四五十岁 */
+  --text-body: 1.0625rem; /* 17px */
+  --text-body-lg: 1.1875rem; /* 19px */
+  --text-num: 2.5rem; /* 40px */
+  --text-num-lg: 3.25rem; /* 52px */
+}
+
+@layer base {
+  html {
+    font-size: 16px;
+  }
+
+  body {
+    margin: 0;
+    background: var(--color-page);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: var(--text-body);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* 金额一律等宽 + 表格数字，列天然对齐。
+     老板扫一眼就能比大小，这比字体好看重要得多。 */
+  .num {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* 键盘流优先：焦点必须看得见，否则"全程不碰鼠标"无从谈起 */
+  :focus-visible {
+    outline: 2px solid var(--color-brand-500);
+    outline-offset: 2px;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+    color: inherit;
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "name": "ly-ledger",
+  "version": "0.1.0",
+  "private": true,
+  "description": "烟酒店进销存台账 —— Tauri + Rust + SQLite + React，本地单机桌面应用",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "web:dev": "pnpm --filter @ly-ledger/web dev",
+    "web:build": "pnpm --filter @ly-ledger/web build",
+    "test": "cargo test --manifest-path packages/desktop/Cargo.toml",
+    "typecheck": "pnpm --filter @ly-ledger/web typecheck && cargo check --manifest-path packages/desktop/Cargo.toml --all-targets"
+  },
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.11.1"
+  },
+  "packageManager": "pnpm@12.4.2"
+}
