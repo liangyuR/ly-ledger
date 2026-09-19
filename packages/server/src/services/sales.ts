@@ -35,6 +35,21 @@ export const CheckoutInput = z.object({
 
 export type CheckoutInput = z.infer<typeof CheckoutInput>;
 
+export interface CheckoutOptions {
+  /**
+   * 成本快照覆盖：productId → unit_cost_base_e4。
+   *
+   * 改单重建时用。未改动的行必须**沿用原单快照**，不能重读当前均价 ——
+   * 否则老板只是把数量 2 改成 3，中间若进过货，这单毛利就会莫名其妙变了，
+   * 他会认为软件在骗他（红线 3 的严格推论，docs/05）。
+   */
+  costOverrideE4?: Map<number, number>;
+  /** 本单是哪张单修订而来 */
+  revisionOfSaleId?: number;
+  /** 修订版本号 */
+  rev?: number;
+}
+
 export interface CheckoutResult {
   saleId: number;
   totalCents: number;
@@ -48,7 +63,7 @@ export interface CheckoutResult {
  * 若前端拆成"建单 → 建明细 → 扣库存 → 写流水"四个请求，中间任何一步失败
  * 数据就脏了且无法自愈。所以必须在服务端事务里包住（docs/03）。
  */
-export function checkout(db: Database, raw: unknown): CheckoutResult {
+export function checkout(db: Database, raw: unknown, opts: CheckoutOptions = {}): CheckoutResult {
   const input = CheckoutInput.parse(raw);
 
   // 不变量 1：customer_id 非空 ⟺ settle_type = 'credit'
@@ -83,8 +98,9 @@ export function checkout(db: Database, raw: unknown): CheckoutResult {
       const unitPriceCents = yuanToCents(item.unitPriceYuan);
 
       // 成本快照：读**当前**加权成本并就地冻结。
-      // 历史单据的成本是既成事实，不是计算结果（红线 3）
-      const unitCostE4 = readStock(db, product.id).avgCostE4;
+      // 历史单据的成本是既成事实，不是计算结果（红线 3）。
+      // 改单重建时用原单快照覆盖，见 CheckoutOptions.costOverrideE4
+      const unitCostE4 = opts.costOverrideE4?.get(product.id) ?? readStock(db, product.id).avgCostE4;
 
       return {
         productId: product.id,
@@ -107,8 +123,9 @@ export function checkout(db: Database, raw: unknown): CheckoutResult {
         .prepare(
           `INSERT INTO sales
              (biz_date, customer_id, settle_type, original_amount_cents, discount_amount_cents,
-              total_amount_cents, cost_amount_cents, gross_profit_cents, note)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              total_amount_cents, cost_amount_cents, gross_profit_cents, note,
+              revision_of_sale_id, rev)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           input.bizDate,
@@ -120,6 +137,8 @@ export function checkout(db: Database, raw: unknown): CheckoutResult {
           costCents,
           totalCents - costCents,
           input.note ?? '',
+          opts.revisionOfSaleId ?? null,
+          opts.rev ?? 1,
         ).lastInsertRowid,
     );
 

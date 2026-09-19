@@ -6,7 +6,15 @@ import { centsToYuan, e4ToYuan, milliToQty, yuanToCents } from '../money';
 import { collect } from '../services/payments';
 import { receive } from '../services/purchases';
 import { checkout } from '../services/sales';
-import { readDebt } from '../services/rebuild-allocations';
+import { rebuildAllocations, readDebt } from '../services/rebuild-allocations';
+import {
+  returnSale,
+  reviseSale,
+  revisePurchase,
+  voidPayment,
+  voidPurchase,
+  voidSale,
+} from '../services/reversals';
 
 /** Zod 的报错对人不友好，转成一句话 */
 function toMessage(err: unknown): string {
@@ -132,6 +140,66 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       netDebt: centsToYuan(r.debt.netDebtCents),
       earliestUnpaidDate: r.debt.earliestUnpaidDate,
     };
+  });
+
+  // ── 逆向：作废 / 改单 / 退货 ──────────────────────────────
+  // 界面上老板看到的是"修改"和"退货"，不出现"作废""红冲"这类会计词汇
+
+  app.post<{ Params: { id: string } }>('/api/sales/:id/void', async (req) => {
+    const r = voidSale(getDb(), Number(req.params.id));
+    return { ok: true, saleId: r.saleId, restoredQty: milliToQty(r.restoredQtyMilli) };
+  });
+
+  app.post<{ Params: { id: string } }>('/api/sales/:id/revise', async (req) => {
+    const r = reviseSale(getDb(), Number(req.params.id), req.body);
+    return {
+      ok: true,
+      saleId: r.saleId,
+      rev: r.rev,
+      replacedSaleId: r.voidedSaleId,
+      total: centsToYuan(r.totalCents),
+      grossProfit: centsToYuan(r.grossProfitCents),
+    };
+  });
+
+  app.post<{ Params: { id: string } }>('/api/sales/:id/return', async (req) => {
+    const r = returnSale(getDb(), Number(req.params.id), req.body);
+    return {
+      ok: true,
+      returnSaleId: r.returnSaleId,
+      originalSaleId: r.originalSaleId,
+      refund: centsToYuan(r.refundCents),
+    };
+  });
+
+  app.post<{ Params: { id: string } }>('/api/purchases/:id/void', async (req) => {
+    const r = voidPurchase(getDb(), Number(req.params.id));
+    return { ok: true, purchaseId: r.purchaseId, warnings: r.warnings };
+  });
+
+  app.post<{ Params: { id: string } }>('/api/purchases/:id/revise', async (req) => {
+    const r = revisePurchase(getDb(), Number(req.params.id), req.body);
+    return {
+      ok: true,
+      purchaseId: r.purchaseId,
+      replacedPurchaseId: r.voidedPurchaseId,
+      total: centsToYuan(r.totalCents),
+      warnings: r.warnings,
+    };
+  });
+
+  app.post<{ Params: { id: string } }>('/api/payments/:id/void', async (req) => {
+    voidPayment(getDb(), Number(req.params.id));
+    return { ok: true };
+  });
+
+  /**
+   * 逃生舱：核销是派生数据，万一失准，重算一次即自愈，不需要人工改数据。
+   * 这是把 allocations 做成派生表的额外收益。
+   */
+  app.post<{ Params: { id: string } }>('/api/customers/:id/rebuild-allocations', async (req) => {
+    const r = rebuildAllocations(getDb(), Number(req.params.id));
+    return { ok: true, allocations: r.allocations.length, prepaid: centsToYuan(r.prepaidCents) };
   });
 
   // ── 欠款 ────────────────────────────────────────────────

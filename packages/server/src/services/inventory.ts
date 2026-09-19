@@ -37,6 +37,13 @@ export interface MovementInput {
   unitCostE4: number;
   refType: string;
   refId: number;
+  /**
+   * type 为 'void' 时必填：撤的是哪一种流水。
+   *
+   * 方向正好相反 —— 作废一笔**销售**是把货加回来（+qty，用原单成本快照），
+   * 作废一笔**进货**是把货扣掉并反算均价（−qty）。搞混了库存会朝反方向走两倍。
+   */
+  reverseOf?: 'sale' | 'purchase';
 }
 
 /**
@@ -71,8 +78,18 @@ export function recordMovement(db: Database, input: MovementInput): CostResult {
       break;
 
     case 'void':
-      next = reversePurchase(prev, input.qtyBaseMilli, input.unitCostE4);
-      signedQty = -input.qtyBaseMilli;
+      if (!input.reverseOf) {
+        throw new Error("作废流水必须说明 reverseOf：撤的是 'sale' 还是 'purchase'");
+      }
+      if (input.reverseOf === 'sale') {
+        // 撤销销售 = 货回来了。按**原单成本快照**入库，均价因此保持不变：
+        // 卖出时按 avg 扣、撤回时按同一个 avg 加，加权公式自然抵消。
+        next = applyPurchase(prev, input.qtyBaseMilli, input.unitCostE4);
+        signedQty = input.qtyBaseMilli;
+      } else {
+        next = reversePurchase(prev, input.qtyBaseMilli, input.unitCostE4);
+        signedQty = -input.qtyBaseMilli;
+      }
       break;
 
     default:
