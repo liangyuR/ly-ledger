@@ -28,6 +28,7 @@
 
 - **后端**：NocoBase 2.x（Apache-2.0 部分）+ 自研业务插件 `plugin-ledger`
 - **前端**：Vite + React 18 + TypeScript + Tailwind CSS + TanStack Query
+- **字体**：思源黑体 Noto Sans SC + IBM Plex Mono，**随包发布，不走 CDN**
 - **数据库**：SQLite（单文件，备份 = 复制文件）
 - **运行**：便携版 Node + nssm 注册 Windows 服务，Edge `--app` 模式作桌面入口
 
@@ -42,6 +43,8 @@
 | [05-变更与撤销](docs/05-变更与撤销.md) | 作废 / 修改 / 退货、核销重算、预收、部分付、抹零 |
 
 `seed/products.sample.json` 是预置商品目录样例（30 条），首次启用时按品牌勾选导入。**只含商品骨架，价格留空由店主填写。**
+
+UI 设计稿（11 块画板，1920×1080）：**https://claude.ai/artifact/NJ9eAxFXQnjLG9p2c1zqzV**
 
 ## 六条设计红线
 
@@ -74,13 +77,13 @@
 |---|---|
 | M0 | 环境搭建，NocoBase + SQLite 跑起来 |
 | M1 | 8 张表在 `plugin-ledger` 中定义完成，后台可增删改查 |
-| M1.5 | 预置商品目录（按品牌勾选导入）+ 卖货页即时新建商品 |
+| M1.5 | 商品入库三条路：预置目录按品牌勾选 · 手工清单/Excel 批量导入 · 卖货页即时新建 |
 | M2 | 正向事务 action：`sales:checkout` / `purchases:receive` / `payments:collect` |
 | M2.5 | **逆向 action**：作废 / 修改 / 退货 + 核销重算。含成本算法与 FIFO 单测 |
 | M3 | 前端骨架：Vite 工程、登录、路由、API 客户端、键盘流基础设施 |
 | M4 | 核心四页：看板 / 卖货 / 进货 / 收款，含单据详情与改单 |
 | M5 | **备份与恢复**：每日自动备份、U 盘备份、状态告警、恢复说明 |
-| M6 | 利润报表：日月毛利、单品排行、滞销预警 |
+| M6 | 利润报表：日月毛利、单品排行、滞销预警 + Excel 导出（明细/欠款/商品） |
 | M7 | Windows 便携包打包 + 真实数据试用打磨 |
 
 > M5 排在报表之前是有意的。本地部署的头号风险是数据丢失——硬盘坏了就是几年台账全没，而老板绝不会自己备份。**备份是产品功能，不是运维事项。**
