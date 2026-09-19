@@ -31,6 +31,7 @@ import {
   staleProducts,
 } from '../services/profit-reports';
 import { dashboard, frequentProducts, listDebts, today } from '../services/reports';
+import { listSales, saleDetail } from '../services/sale-detail';
 import { importSeedBrands, listSeedBrands } from '../services/seed-import';
 import {
   returnSale,
@@ -476,6 +477,66 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       prepaid: centsToYuan(r.prepaidCents),
       netDebt: centsToYuan(r.debt.netDebtCents),
       earliestUnpaidDate: r.debt.earliestUnpaidDate,
+    };
+  });
+
+  // ── 单据详情 ─────────────────────────────────────────────
+  app.get<{ Params: { id: string } }>('/api/sales/:id', async (req) => {
+    const d = saleDetail(getDb(), Number(req.params.id));
+    return {
+      ok: true,
+      id: d.id,
+      bizDate: d.bizDate,
+      createdAt: d.createdAt,
+      settleType: d.settleType,
+      customerId: d.customerId,
+      customerName: d.customerName,
+      original: centsToYuan(d.originalCents),
+      discount: centsToYuan(d.discountCents),
+      total: centsToYuan(d.totalCents),
+      cost: centsToYuan(d.costCents),
+      profit: centsToYuan(d.profitCents),
+      returned: centsToYuan(d.returnedCents),
+      settled: centsToYuan(d.settledCents),
+      note: d.note,
+      rev: d.rev,
+      voidedAt: d.voidedAt,
+      voidReason: d.voidReason,
+      items: d.items.map((i) => ({
+        productId: i.productId,
+        name: i.name,
+        qty: milliToQty(i.qtyMilli),
+        unitLabel: i.unitLabel,
+        unit: i.unit,
+        unitPrice: centsToYuan(i.unitPriceCents),
+        amount: centsToYuan(i.amountCents),
+        // 成交那一刻冻结的成本，不是当前均价
+        unitCost: e4ToYuan(i.unitCostE4),
+        cost: centsToYuan(i.costCents),
+        profit: centsToYuan(i.profitCents),
+      })),
+      events: d.events.map((e) => ({
+        kind: e.kind,
+        saleId: e.saleId,
+        time: e.at.slice(11, 16),
+        date: e.at.slice(0, 10),
+        rev: e.rev,
+        summary: e.summary,
+        current: e.current,
+      })),
+      canRevise: d.canRevise,
+      canReturn: d.canReturn,
+      blockedReason: d.blockedReason,
+    };
+  });
+
+  app.get<{ Querystring: { date?: string } }>('/api/sales', async (req) => {
+    const db = getDb();
+    const date = req.query.date ?? today(db);
+    return {
+      ok: true,
+      date,
+      items: listSales(db, date).map((s) => ({ ...s, total: centsToYuan(s.totalCents) })),
     };
   });
 

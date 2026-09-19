@@ -6,6 +6,7 @@ import Dashboard from './pages/Dashboard';
 import Products from './pages/Products';
 import Purchase from './pages/Purchase';
 import Report from './pages/Report';
+import SaleDetail from './pages/SaleDetail';
 import Sell from './pages/Sell';
 
 export default function App() {
@@ -19,6 +20,7 @@ export default function App() {
           <Route path="/purchase" element={<Purchase />} />
           <Route path="/collect" element={<Collect />} />
           <Route path="/report" element={<Report />} />
+          <Route path="/sales/:id" element={<SaleDetail />} />
           <Route path="/products" element={<Products />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

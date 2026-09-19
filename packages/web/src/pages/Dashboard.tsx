@@ -160,14 +160,19 @@ export default function Dashboard() {
 
       <Card
         title="今日流水"
-        extra={<span className="text-[17px] text-muted">单据详情与改单在 M4 后续</span>}
+        extra={<span className="text-[17px] text-muted">点一行打开单据，可改可退</span>}
         className="shrink-0"
       >
         {(d?.recentSales.length ?? 0) === 0 && (
           <div className="text-[17px] text-muted">今天还没开张</div>
         )}
         {d?.recentSales.map((s) => (
-          <div key={s.id} className="flex h-13 items-center gap-6 border-t border-line text-[19px]">
+          <button
+            key={s.id}
+            type="button"
+            onClick={() => navigate(`/sales/${s.id}`)}
+            className="flex h-13 w-full items-center gap-6 border-t border-line text-left text-[19px] hover:bg-page"
+          >
             <span className="num w-16 text-ink-2">{s.time}</span>
             <span className="w-52">{s.summary}</span>
             <span className="grow" />
@@ -179,7 +184,7 @@ export default function Dashboard() {
             >
               {s.settleType === 'credit' ? `挂账 · ${s.customerName ?? ''}` : '现金'}
             </span>
-          </div>
+          </button>
         ))}
       </Card>
     </>

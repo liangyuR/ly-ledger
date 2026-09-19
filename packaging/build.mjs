@@ -84,6 +84,10 @@ mkdirSync(join(OUT, 'backup'), { recursive: true });
 mkdirSync(join(OUT, 'runtime'), { recursive: true });
 mkdirSync(join(OUT, 'tools'), { recursive: true });
 
+// 崩溃守护
+cpSync(join(HERE, 'supervise.cjs'), join(OUT, 'supervise.cjs'));
+mkdirSync(join(OUT, 'logs'), { recursive: true });
+
 // 恢复说明要跟着包走 —— 出事那天在这个文件夹里就能找到
 cpSync(join(ROOT, 'docs/06-备份与恢复.md'), join(OUT, '出事了看这个-备份与恢复.md'));
 
@@ -144,14 +148,16 @@ nodeExe = here & "\\runtime\\node\\node.exe"
 If Not fso.FileExists(nodeExe) Then nodeExe = "node"
 
 sh.CurrentDirectory = here
+' 起的是守护进程不是服务本身：服务挂了它会把服务拉起来
 ' 第二个参数 0 = 隐藏窗口，第三个 False = 不等它结束
 ' 用 Chr(34) 拼引号，不靠数连续引号 —— 那种写法多一对少一对都不报错，只是启动不了
 q = Chr(34)
-sh.Run q & nodeExe & q & " " & q & here & "\\app\\server.cjs" & q, 0, False
+sh.Run q & nodeExe & q & " " & q & here & "\\supervise.cjs" & q, 0, False
 `,
 
   '停止台账.bat': `${CD}
 echo 正在停止...
+rem 一起杀掉：只杀服务的话，守护进程会立刻把它拉回来
 taskkill /f /im node.exe >nul 2>&1
 echo 已停止。数据都在 data\\ledger.db 里，没有丢。
 pause
@@ -237,6 +243,10 @@ writeFileSync(
     '软件每天凌晨 3 点自动备份到 backup\\ 下面，保留最近 30 天。',
     '但本机备份防不了硬盘损坏 —— 请准备一个 U 盘常插着，',
     '每周在软件首页点一次「备份到 U 盘」。',
+    '',
+    '软件万一崩了会自己爬起来，重启记录写在 logs\supervisor.log。',
+    '如果它反复崩（两分钟内 5 次），会停下来不再重试 —— 那说明不是偶发问题，',
+    '请把那个日志发给维护者。数据不会因此丢失。',
     '',
     '出事了怎么办：看「出事了看这个-备份与恢复.md」。',
     '建议现在就打印一份压在柜台下面 —— 电脑开不了机的时候，',
