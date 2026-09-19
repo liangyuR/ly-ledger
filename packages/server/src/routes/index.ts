@@ -9,6 +9,7 @@ import { checkout } from '../services/sales';
 import { toPinyin } from '../services/pinyin';
 import { importProductList, parseProductList } from '../services/product-import';
 import { rebuildAllocations, readDebt } from '../services/rebuild-allocations';
+import { dashboard, frequentProducts, listDebts, today } from '../services/reports';
 import { importSeedBrands, listSeedBrands } from '../services/seed-import';
 import {
   returnSale,
@@ -138,6 +139,179 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Body: { text?: string; category?: string } }>('/api/products/import', async (req) => {
     const r = importProductList(getDb(), req.body?.text ?? '', req.body?.category ?? 'other');
     return { ok: true, created: r.created, skipped: r.skipped, invalid: r.invalid };
+  });
+
+  /**
+   * 改商品。商品页支持双击格子直接改 —— 批量填价格是启用期最高频的操作，
+   * 不该逐个进详情页（docs/04）。
+   */
+  app.patch<{
+    Params: { id: string };
+    Body: {
+      name?: string;
+      brand?: string;
+      spec?: string;
+      baseUnit?: string;
+      packUnit?: string | null;
+      packRatio?: number;
+      priceBaseYuan?: string | null;
+      pricePackYuan?: string | null;
+      sortWeight?: number;
+      isActive?: boolean;
+    };
+  }>('/api/products/:id', async (req) => {
+    const db = getDb();
+    const id = Number(req.params.id);
+    const b = req.body ?? {};
+
+    const current = db.prepare('SELECT * FROM products WHERE id = ?').get(id);
+    if (!current) throw new Error(`商品不存在：${id}`);
+
+    const sets: string[] = [];
+    const args: unknown[] = [];
+    const put = (col: string, val: unknown) => {
+      sets.push(`${col} = ?`);
+      args.push(val);
+    };
+
+    if (b.name !== undefined) {
+      const name = b.name.trim();
+      if (!name) throw new Error('商品名不能为空');
+      const dup = db.prepare('SELECT id FROM products WHERE name = ? AND id <> ?').get(name, id);
+      if (dup) throw new Error(`已经有叫「${name}」的商品了`);
+      const py = toPinyin(name);
+      put('name', name);
+      put('pinyin_full', py.full);
+      put('pinyin_abbr', py.abbr);
+    }
+    if (b.brand !== undefined) put('brand', b.brand);
+    if (b.spec !== undefined) put('spec', b.spec);
+    if (b.baseUnit !== undefined) put('base_unit', b.baseUnit);
+    if (b.packUnit !== undefined) put('pack_unit', b.packUnit);
+    if (b.packRatio !== undefined) put('pack_ratio', b.packRatio);
+    if (b.priceBaseYuan !== undefined) {
+      put('price_base_cents', b.priceBaseYuan == null || b.priceBaseYuan === '' ? null : yuanToCents(b.priceBaseYuan));
+    }
+    if (b.pricePackYuan !== undefined) {
+      put('price_pack_cents', b.pricePackYuan == null || b.pricePackYuan === '' ? null : yuanToCents(b.pricePackYuan));
+    }
+    if (b.sortWeight !== undefined) put('sort_weight', b.sortWeight);
+    if (b.isActive !== undefined) put('is_active', b.isActive ? 1 : 0);
+
+    if (sets.length === 0) return { ok: true, productId: id, changed: 0 };
+
+    put('updated_at', new Date().toISOString().slice(0, 19).replace('T', ' '));
+    args.push(id);
+    db.prepare(`UPDATE products SET ${sets.join(', ')} WHERE id = ?`).run(...args);
+
+    return { ok: true, productId: id, changed: sets.length };
+  });
+
+  /** 常用商品：近 30 天销量前 12，数字键直选用 */
+  app.get('/api/products/frequent', async () => {
+    return {
+      ok: true,
+      items: frequentProducts(getDb()).map((p) => ({
+        ...p,
+        priceBase: p.price_base_cents == null ? null : centsToYuan(p.price_base_cents),
+        pricePack: p.price_pack_cents == null ? null : centsToYuan(p.price_pack_cents),
+      })),
+    };
+  });
+
+  // ── 客户与供应商 ─────────────────────────────────────────
+  app.get<{ Querystring: { q?: string } }>('/api/customers', async (req) => {
+    const db = getDb();
+    const q = (req.query.q ?? '').trim();
+    const items = q
+      ? db
+          .prepare(
+            `SELECT * FROM customers
+              WHERE is_active = 1 AND (name LIKE ? OR pinyin_full LIKE ? OR pinyin_abbr LIKE ?)
+              ORDER BY id LIMIT 30`,
+          )
+          .all(`%${q}%`, `${q}%`, `${q}%`)
+      : db.prepare('SELECT * FROM customers WHERE is_active = 1 ORDER BY id LIMIT 30').all();
+    return { ok: true, items };
+  });
+
+  app.post<{ Body: { name?: string; phone?: string } }>('/api/customers', async (req, reply) => {
+    const name = req.body?.name?.trim();
+    if (!name) throw new Error('客户名不能为空');
+
+    const db = getDb();
+    const dup = db.prepare('SELECT id FROM customers WHERE name = ?').get(name);
+    if (dup) {
+      reply.status(409);
+      return { ok: false, error: `客户「${name}」已存在`, customerId: (dup as { id: number }).id };
+    }
+
+    const py = toPinyin(name);
+    const id = db
+      .prepare('INSERT INTO customers (name, pinyin_full, pinyin_abbr, phone) VALUES (?, ?, ?, ?)')
+      .run(name, py.full, py.abbr, req.body?.phone ?? '').lastInsertRowid;
+
+    reply.status(201);
+    return { ok: true, customerId: Number(id) };
+  });
+
+  app.get('/api/suppliers', async () => {
+    return { ok: true, items: getDb().prepare('SELECT * FROM suppliers ORDER BY id').all() };
+  });
+
+  app.post<{ Body: { name?: string; phone?: string } }>('/api/suppliers', async (req, reply) => {
+    const name = req.body?.name?.trim();
+    if (!name) throw new Error('供应商名不能为空');
+    const db = getDb();
+    const dup = db.prepare('SELECT id FROM suppliers WHERE name = ?').get(name);
+    if (dup) {
+      reply.status(409);
+      return { ok: false, error: `供应商「${name}」已存在`, supplierId: (dup as { id: number }).id };
+    }
+    const id = db
+      .prepare('INSERT INTO suppliers (name, phone) VALUES (?, ?)')
+      .run(name, req.body?.phone ?? '').lastInsertRowid;
+    reply.status(201);
+    return { ok: true, supplierId: Number(id) };
+  });
+
+  // ── 看板与欠款列表 ────────────────────────────────────────
+  app.get('/api/reports/dashboard', async () => {
+    const d = dashboard(getDb());
+    return {
+      ok: true,
+      date: d.date,
+      todayRevenue: centsToYuan(d.todayRevenueCents),
+      todayProfit: centsToYuan(d.todayProfitCents),
+      monthProfit: centsToYuan(d.monthProfitCents),
+      inventoryValue: centsToYuan(d.inventoryValueCents),
+      debtTotal: centsToYuan(d.debtTotalCents),
+      debtCount: d.debtCount,
+      alerts: d.alerts,
+      recentSales: d.recentSales.map((s) => ({
+        ...s,
+        total: centsToYuan(s.totalCents),
+      })),
+    };
+  });
+
+  app.get('/api/customers/debts', async () => {
+    const d = listDebts(getDb());
+    const fmt = (r: { customerId: number; name: string; netDebtCents: number; earliestUnpaidDate: string | null; agingDays: number | null }) => ({
+      customerId: r.customerId,
+      name: r.name,
+      // 预收对外显示成正数，前端只管标签不同
+      amount: centsToYuan(Math.abs(r.netDebtCents)),
+      earliestUnpaidDate: r.earliestUnpaidDate,
+      agingDays: r.agingDays,
+    });
+    return {
+      ok: true,
+      today: today(getDb()),
+      owing: d.owing.map(fmt),
+      prepaid: d.prepaid.map(fmt),
+      totalOwing: centsToYuan(d.owing.reduce((s, r) => s + r.netDebtCents, 0)),
+    };
   });
 
   // ── 三个正向事务 action ──────────────────────────────────
