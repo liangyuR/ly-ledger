@@ -1,0 +1,28 @@
+<!--
+  烟酒台账图标 —— 小尺寸版，16/24/32 用这个。
+
+  和完整版同一个瓶形，但不开标签：那一块在 16px 下只有两三个像素高，
+  开出来是一道灰边，整个瓶子被切成两截，反而不像瓶子了。
+  实心轮廓在这个尺寸最认得出来。
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#17705a"/>
+      <stop offset="1" stop-color="#0b3d31"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="256" height="256" rx="56" fill="url(#bg)"/>
+
+  <rect x="106" y="30" width="44" height="28" rx="7" fill="#f5f5f3"/>
+
+  <path fill="#f5f5f3" d="
+    M112 56 h32 v46
+    C 144 120, 186 124, 186 152
+    V 210 a18 18 0 0 1 -18 18
+    H 88 a18 18 0 0 1 -18 -18
+    V 152
+    C 70 124, 112 120, 112 102
+    Z"/>
+</svg>

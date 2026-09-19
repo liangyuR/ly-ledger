@@ -3,6 +3,13 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      老板看到的那个窗口是 msedge --app 起的，它的任务栏图标取自这里的 favicon，
+      不是 exe 的图标 —— 所以这一行比给 exe 换图标更要紧。
+      用 .ico 而不是 .svg：ico 里按尺寸放了不同繁简程度的图，16px 那张是实心瓶，
+      svg 在 16px 下会把标签细节糊成一团。
+    -->
+    <link rel="icon" href="/favicon.ico" sizes="any" />
     <title>烟酒台账</title>
   </head>
   <body>
