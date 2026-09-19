@@ -44,17 +44,37 @@ npm start
 
 访问 `http://127.0.0.1:13000/health`。启动时会自动执行未跑过的迁移，不需要单独的建表步骤。
 
-常用命令：
+### 开发期：一条命令拉起前后端
+
+```
+npm run dev
+```
+
+然后打开 **http://localhost:5173**，改代码自动刷新。Ctrl-C 一次把两个都停掉。
+
+开发期是**两个进程**：后端 13000，Vite 5173 负责热更新并把 `/api` 转给后端
+（`vite.config.ts` 的 proxy）。**上线只有一个** —— 后端把 `packages/web/dist`
+托在 `/` 上，同域，没有跨域问题。所以便携包里只跑一个 `node`。
+
+想只跑一个进程、不要热更新（比如验便携包的行为）：
+
+```
+npm run web:build && npm start
+```
+
+这时前后端都在 **http://127.0.0.1:13000**，跟装到柜台电脑上一模一样。
+
+### 常用命令
 
 | 命令 | 作用 |
 |---|---|
-| `npm start` | 启动服务 |
-| `npm run dev` | 带热重载启动 |
+| `npm run dev` | **前后端一起起**，热重载，开 5173 |
+| `npm start` | 只起后端（会托管已构建的前端产物），开 13000 |
+| `npm run dev:server` / `dev:web` | 分开起，调试某一边时用 |
 | `npm run migrate` | 只跑迁移，打印当前表 |
-| `npm test` | 单测 + 端到端（54 项），用内存库，不碰真实数据 |
-| `npm run verify:model` | **拿真数据撞一遍数据模型的约束**，全程事务、跑完回滚 |
+| `npm test` | 单测 + 端到端（154 项），用内存库，不碰真实数据 |
+| `npm run verify:model` | **拿约束撞一遍数据模型**，跑在临时库上，不碰真实数据 |
 | `npm run typecheck` | 类型检查 |
-| `npm run web:dev` | 前端开发服务（热重载，接口转发到后端） |
 | `npm run web:build` | 构建前端产物，后端启动时会自动托管 |
 | `npm run package` | 打 Windows 便携包到 `packaging/out/` |
 
