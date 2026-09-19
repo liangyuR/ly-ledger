@@ -2,12 +2,14 @@ import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { dirname, isAbsolute, resolve } from 'node:path';
 
+import { APP_ROOT } from '../env';
+
 let handle: Database.Database | null = null;
 
 /** 打开一个连接并设好 pragma。测试用 ':memory:' 拿独立的库。 */
 export function openDb(file: string): Database.Database {
   if (file !== ':memory:') {
-    const path = isAbsolute(file) ? file : resolve(process.cwd(), file);
+    const path = isAbsolute(file) ? file : resolve(APP_ROOT, file);
     mkdirSync(dirname(path), { recursive: true });
     file = path;
   }

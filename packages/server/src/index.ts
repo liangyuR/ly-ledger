@@ -9,6 +9,12 @@ async function main() {
   // 升级覆盖 app 后第一次启动就得把表结构带上来。
   const { applied } = migrate();
 
+  // 安装.bat 用它：只建表然后退出，不启服务
+  if (process.argv.includes('--init-only')) {
+    console.log(applied.length ? `已建表（${applied.length} 个迁移）` : '表已经是最新的');
+    return;
+  }
+
   const app = await buildApp();
   if (applied.length) {
     app.log.info({ applied }, '已执行迁移');

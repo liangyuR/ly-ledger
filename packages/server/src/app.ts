@@ -1,9 +1,10 @@
 import fastifyStatic from '@fastify/static';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { isAbsolute, resolve } from 'node:path';
 
 import { getDb } from './db';
+import { APP_ROOT } from './env';
 import { registerRoutes } from './routes';
 
 /**
@@ -11,8 +12,9 @@ import { registerRoutes } from './routes';
  * 同域，省掉 CORS，也省掉第二个进程 —— 便携包里只有一个服务要管。
  */
 function serveWeb(app: FastifyInstance): void {
+  const fromEnv = process.env.WEB_DIST;
   const candidates = [
-    process.env.WEB_DIST,
+    fromEnv && (isAbsolute(fromEnv) ? fromEnv : resolve(APP_ROOT, fromEnv)),
     resolve(__dirname, '..', 'web'),                       // 打包后的布局
     resolve(__dirname, '..', '..', 'web', 'dist'),         // 开发期 workspace 布局
   ].filter(Boolean) as string[];

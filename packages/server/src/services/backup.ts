@@ -11,12 +11,13 @@ import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync, copyFileSync 
 import { basename, isAbsolute, join, resolve } from 'node:path';
 
 import { getDb } from '../db';
+import { APP_ROOT } from '../env';
 
 const KEEP = 30;
 
 export function backupDir(): string {
   const dir = process.env.BACKUP_DIR || 'backup';
-  const path = isAbsolute(dir) ? dir : resolve(process.cwd(), dir);
+  const path = isAbsolute(dir) ? dir : resolve(APP_ROOT, dir);
   mkdirSync(path, { recursive: true });
   return path;
 }

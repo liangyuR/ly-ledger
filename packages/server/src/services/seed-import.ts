@@ -9,8 +9,9 @@
  */
 import type { Database } from 'better-sqlite3';
 import { existsSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { isAbsolute, resolve } from 'node:path';
 
+import { APP_ROOT } from '../env';
 import { toPinyin } from './pinyin';
 
 interface SeedProduct {
@@ -35,10 +36,12 @@ interface SeedFile {
  * 允许用 SEED_FILE 覆盖。
  */
 function resolveSeedPath(): string {
+  const fromEnv = process.env.SEED_FILE;
   const candidates = [
-    process.env.SEED_FILE,
+    fromEnv && (isAbsolute(fromEnv) ? fromEnv : resolve(APP_ROOT, fromEnv)),
+    resolve(__dirname, '..', 'seed', 'products.sample.json'), // 打包后：app/../seed
     resolve(__dirname, '..', '..', 'seed', 'products.sample.json'),
-    resolve(__dirname, '..', '..', '..', '..', 'seed', 'products.sample.json'),
+    resolve(__dirname, '..', '..', '..', '..', 'seed', 'products.sample.json'), // 开发期 workspace
   ].filter(Boolean) as string[];
 
   const found = candidates.find((p) => existsSync(p));
