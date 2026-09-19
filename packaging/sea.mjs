@@ -43,6 +43,30 @@ function findSigntool() {
   return null;
 }
 
+/**
+ * 摘掉 node.exe 自带的微软签名。
+ *
+ * 会偶发失败：exe 有 92 MB，刚拷完 Defender 正在扫它，signtool 打不开来写。
+ * 试几次基本就过了，所以这里重试而不是直接崩 —— 打一次包等好几分钟，
+ * 栽在一个必然能重试成功的地方最让人恼火。
+ */
+function stripSignature(signtool, exe, attempts = 3) {
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      execFileSync(signtool, ['remove', '/s', exe], { stdio: 'ignore' });
+      return true;
+    } catch {
+      if (i === attempts) return false;
+      // 同步等一下，让扫描先过去。这是构建脚本，卡住主线程无所谓
+      const until = Date.now() + 1000 * i;
+      while (Date.now() < until) {
+        /* 空转 */
+      }
+    }
+  }
+  return false;
+}
+
 // ───────────────────────── 1. 清空 ─────────────────────────
 console.log('\n打包烟酒台账（SEA 单 exe 版）\n');
 rmSync(join(HERE, 'out-sea'), { recursive: true, force: true });
@@ -99,11 +123,13 @@ cpSync(process.execPath, exePath);
 // 先把签名摘掉，Windows 就当它是个普通未签名程序 —— 比留一个"坏签名"干净：
 // 坏签名在某些安全软件眼里比没签名更可疑。
 const signtool = findSigntool();
-if (signtool) {
-  execFileSync(signtool, ['remove', '/s', exePath], { stdio: 'ignore' });
+if (!signtool) {
+  log('  [!] 没找到 signtool，exe 会带一个坏签名（能跑，但不干净）');
+} else if (stripSignature(signtool, exePath)) {
   log('  已摘除 node.exe 原有签名');
 } else {
-  log('  [!] 没找到 signtool，exe 会带一个坏签名（能跑，但不干净）');
+  // 摘不掉不值得让整包失败：坏签名的 exe 照样能跑，只是不干净
+  log('  [!] 摘除签名失败（试了 3 次），exe 会带一个坏签名（能跑，但不干净）');
 }
 
 log('  换图标、写版本信息…');

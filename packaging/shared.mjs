@@ -14,6 +14,16 @@ import { join } from 'node:path';
 /** 所有 .bat 都要先 cd 到自己所在目录 —— 双击时 cwd 是桌面，不是这里 */
 export const CD = '@echo off\r\ncd /d "%~dp0"\r\nchcp 65001 >nul\r\n';
 
+/**
+ * 换行一律转成 CRLF。
+ *
+ * 这些内容是用 JS 模板字符串拼的，模板里的换行是 LF。单行命令用 LF 也能跑，
+ * 所以这个问题藏了很久 —— 但 cmd 解析跨行的 `for ... do (` / `if ... (` 块时
+ * 认 CRLF，LF 会直接报「The syntax of the command is incorrect.」。
+ * 安装.bat 里的 if errorlevel 块一直踩在这上面。
+ */
+const crlf = (s) => s.replace(/\r?\n/g, '\r\n');
+
 export const mb = (bytes) => `${(bytes / 1048576).toFixed(1)} MB`;
 
 export function dirSize(dir) {
@@ -166,7 +176,15 @@ rem 用 vbs 起后台进程：老板不会去分辨哪个黑窗口能关、哪�
 rem 一旦误关，柜台上正在录的那笔单就没了
 cscript //nologo 后台启动.vbs
 timeout /t 3 /nobreak >nul
-start "" msedge.exe --app=http://127.0.0.1:13000
+
+rem 端口从 .env 读，不写死 —— 写死过一次，.env 改成别的端口之后
+rem 服务在新端口上、浏览器还开旧端口，打开的是一个根本不存在的地址，
+rem 或者更糟：撞上这台机器上另一个程序，看起来"能打开"但数据是别人的
+set APP_PORT=13000
+for /f "usebackq eol=# tokens=1,* delims==" %%a in (".env") do (
+  if /i "%%a"=="APP_PORT" set APP_PORT=%%b
+)
+start "" msedge.exe --app=http://127.0.0.1:%APP_PORT%
 exit
 `,
 
@@ -221,7 +239,7 @@ pause
   };
 
   for (const [name, content] of Object.entries(files)) {
-    writeFileSync(join(out, name), content, 'utf8');
+    writeFileSync(join(out, name), crlf(content), 'utf8');
   }
 
   writeFileSync(
