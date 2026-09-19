@@ -1,0 +1,21 @@
+{
+  "name": "ly-ledger",
+  "version": "0.1.0",
+  "private": true,
+  "description": "烟酒店进销存台账 —— NocoBase 后端 + 自研极简前端，本地单机运行",
+  "engines": {
+    "node": ">=20"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "server": "npm run -w @ly-ledger/server",
+    "server:install": "npm run app:install -w @ly-ledger/server",
+    "server:start": "npm run start -w @ly-ledger/server"
+  },
+  "license": "UNLICENSED",
+  "overrides": {
+    "@nocobase/client": "2.2.15"
+  }
+}

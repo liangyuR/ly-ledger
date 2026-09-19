@@ -32,6 +32,32 @@
 - **数据库**：SQLite（单文件，备份 = 复制文件）
 - **运行**：便携版 Node + nssm 注册 Windows 服务，Edge `--app` 模式作桌面入口
 
+## 本地开发
+
+前置：Node ≥ 20（实测 24.19.0），npm ≥ 10。**不要用 pnpm** —— NocoBase 的 registry 元数据不合规范，pnpm v12 解析不了，详见 [03-技术架构](docs/03-技术架构.md#包管理器npm不是-pnpm)。
+
+```bash
+npm install
+cp packages/server/.env.example packages/server/.env
+```
+
+`.env` 里的 `APP_KEY` 必须换成随机值：
+
+```bash
+node -e "console.log(require('crypto').randomBytes(256).toString('base64'))"
+```
+
+然后建表、启动：
+
+```bash
+npm run server:install
+npm run server:start
+```
+
+访问 `http://localhost:13000`。NocoBase 后台在 `/admin`，用 `.env` 里的 `INIT_ROOT_*` 登录 —— **那是给维护者查数据、改错账用的，不是给店主用的**（店主那侧无密码自动登录，见 03）。
+
+数据库是单文件 `packages/server/data/ledger.db`。想推倒重来就删掉它再跑一次 `server:install`。
+
 ## 文档
 
 | 文档 | 内容 |

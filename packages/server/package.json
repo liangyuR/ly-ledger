@@ -1,0 +1,44 @@
+{
+  "name": "@ly-ledger/server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "NocoBase 作 headless 后端 + 运维后台",
+  "main": "src/index.ts",
+  "scripts": {
+    "nb": "tsx src/index.ts",
+    "app:install": "tsx src/index.ts install",
+    "app:upgrade": "tsx src/index.ts upgrade",
+    "start": "tsx src/index.ts start",
+    "dev": "tsx src/index.ts start"
+  },
+  "dependencies": {
+    "@nocobase/server": "2.2.15",
+
+    "@nocobase/plugin-error-handler": "2.2.15",
+    "@nocobase/plugin-data-source-main": "2.2.15",
+    "@nocobase/plugin-data-source-manager": "2.2.15",
+    "@nocobase/plugin-ui-schema-storage": "2.2.15",
+    "@nocobase/plugin-ui-layout": "2.2.15",
+    "@nocobase/plugin-flow-engine": "2.2.15",
+    "@nocobase/plugin-client": "2.2.15",
+    "@nocobase/plugin-acl": "2.2.15",
+    "@nocobase/plugin-auth": "2.2.15",
+    "@nocobase/plugin-users": "2.2.15",
+    "@nocobase/plugin-system-settings": "2.2.15",
+    "@nocobase/plugin-field-sort": "2.2.15",
+    "@nocobase/plugin-localization": "2.2.15",
+
+    "@nocobase/plugin-action-export": "2.2.15",
+    "@nocobase/plugin-action-import": "2.2.15",
+    "@nocobase/plugin-backups": "2.2.15",
+    "@nocobase/plugin-api-doc": "2.2.15",
+    "@nocobase/plugin-api-keys": "2.2.15",
+
+    "dotenv": "^16.4.7",
+    "sqlite3": "^6.0.1"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}
