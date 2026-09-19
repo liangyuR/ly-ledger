@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 
-import { api } from '../api/client';
+import { api, exportXlsx, type ExportKind } from '../api/client';
 import { Card, Figure } from '../components/Card';
 
 interface Profit {
@@ -32,16 +32,11 @@ interface Profit {
 
 type Tab = 'trend' | 'ranking' | 'stale';
 
-/** 下载不走 fetch —— 让浏览器自己处理 Content-Disposition，文件名才对 */
-function download(path: string) {
-  window.location.href = path;
-}
-
-function XlsxButton({ href, children }: { href: string; children: string }) {
+function XlsxButton({ kind, children }: { kind: ExportKind; children: string }) {
   return (
     <button
       type="button"
-      onClick={() => download(href)}
+      onClick={() => void exportXlsx(kind)}
       className="flex h-12 items-center gap-2.5 rounded-[10px] border border-line bg-card px-5 text-[17px]"
     >
       <svg
@@ -138,7 +133,7 @@ export default function Report() {
           ))}
         </div>
         <span className="grow" />
-        <XlsxButton href="/api/reports/export">导出本月明细</XlsxButton>
+        <XlsxButton kind="sales">导出本月明细</XlsxButton>
       </div>
 
       <div className="flex shrink-0 gap-5">
@@ -195,7 +190,7 @@ export default function Report() {
             }
           >
             <div className="mb-3 flex justify-end">
-              <XlsxButton href="/api/reports/export-ranking">导出排行</XlsxButton>
+              <XlsxButton kind="ranking">导出排行</XlsxButton>
             </div>
             {(d?.ranking.length ?? 0) === 0 && <div className="text-[17px] text-muted">本月还没有销售</div>}
             {d?.ranking.map((r) => (
@@ -227,7 +222,7 @@ export default function Report() {
             extra={<span className="text-[17px] text-ink-2">有货但超 90 天没卖动，按压的钱排序</span>}
           >
             <div className="mb-3 flex justify-end">
-              <XlsxButton href="/api/reports/export-stale">导出滞销表</XlsxButton>
+              <XlsxButton kind="stale">导出滞销表</XlsxButton>
             </div>
             {(d?.stale.length ?? 0) === 0 && <div className="text-[17px] text-muted">没有滞销的货</div>}
             {d?.stale.map((s) => (

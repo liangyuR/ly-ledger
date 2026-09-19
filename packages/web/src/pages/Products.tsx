@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 
-import { api, endpoints } from '../api/client';
+import { api, endpoints, exportXlsx } from '../api/client';
 import { Card } from '../components/Card';
 import { centsToYuan } from '../money';
 
@@ -143,9 +143,7 @@ export default function Products() {
         />
         <button
           type="button"
-          onClick={() => {
-            window.location.href = '/api/products/export';
-          }}
+          onClick={() => void exportXlsx('products')}
           className="h-12 rounded-[10px] border border-line bg-card px-5 text-[17px]"
         >
           导出 Excel

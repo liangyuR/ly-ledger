@@ -2,7 +2,7 @@
   "name": "ly-ledger",
   "version": "0.1.0",
   "private": true,
-  "description": "烟酒店进销存台账 —— Fastify + SQLite + React，本地单机运行",
+  "description": "烟酒店进销存台账 —— Tauri + Rust + SQLite + React，本地单机桌面应用",
   "engines": {
     "node": ">=20"
   },
@@ -10,22 +10,15 @@
     "packages/*"
   ],
   "scripts": {
-    "migrate": "npm run migrate -w @ly-ledger/server",
-    "start": "npm run start -w @ly-ledger/server",
-    "dev": "node scripts/dev.mjs",
-    "dev:server": "npm run dev -w @ly-ledger/server",
-    "typecheck": "npm run typecheck -w @ly-ledger/server && npm run typecheck -w @ly-ledger/web",
-    "verify:model": "npm run verify:model -w @ly-ledger/server",
-    "test": "npm test -w @ly-ledger/server",
-    "dev:web": "npm run dev -w @ly-ledger/web",
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "web:dev": "npm run dev -w @ly-ledger/web",
     "web:build": "npm run build -w @ly-ledger/web",
-    "package": "npm run web:build && node packaging/build.mjs",
-    "package:sea": "npm run web:build && node packaging/sea.mjs"
+    "test": "cargo test --manifest-path packages/desktop/Cargo.toml",
+    "typecheck": "npm run typecheck -w @ly-ledger/web && cargo check --manifest-path packages/desktop/Cargo.toml --all-targets"
   },
   "license": "UNLICENSED",
   "devDependencies": {
-    "esbuild": "^0.28.2",
-    "postject": "^1.0.0-alpha.6",
-    "rcedit": "^5.0.2"
+    "@tauri-apps/cli": "^2.11.1"
   }
 }

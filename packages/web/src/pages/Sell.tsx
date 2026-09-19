@@ -344,9 +344,10 @@ export default function Sell() {
         <label className="flex items-center gap-2.5 text-[17px] text-ink-2">
           业务日期
           <input
+            type="date"
             value={bizDate}
             onChange={(e) => setBizDate(e.target.value)}
-            className="num h-12 w-[168px] rounded-[10px] border border-line bg-card px-4 text-[19px]"
+            className="num h-12 w-[200px] rounded-[10px] border border-line bg-card px-4 text-[19px]"
           />
         </label>
         <span className="text-[16px] text-muted">补录昨天的单就改这里</span>
@@ -656,7 +657,7 @@ export default function Sell() {
                 ))}
                 {(customers.data?.items.length ?? 0) === 0 && (
                   <span className="text-[17px] text-muted">
-                    没找到客户。先去收款页或后台建一个
+                    没找到客户。先去挂账归还页或后台建一个
                   </span>
                 )}
               </div>

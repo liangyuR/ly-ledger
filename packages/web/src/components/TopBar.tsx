@@ -25,7 +25,7 @@ function describe(s: BackupStatus | undefined): string {
 const NAV = [
   { to: '/sell', key: 'F1', label: '卖货' },
   { to: '/purchase', key: 'F2', label: '进货' },
-  { to: '/collect', key: 'F3', label: '收款' },
+  { to: '/collect', key: 'F3', label: '挂账归还' },
   { to: '/report', key: 'F4', label: '报表' },
   { to: '/products', key: 'F5', label: '商品' },
 ];
@@ -46,7 +46,7 @@ export default function TopBar() {
   return (
     <header className="flex h-21 shrink-0 items-center gap-7 overflow-x-auto border-b border-line bg-card px-10">
       <NavLink to="/" className="shrink-0 text-2xl font-semibold whitespace-nowrap text-brand-900">
-        烟酒台账
+        主页
       </NavLink>
 
       <nav className="flex grow gap-1">
@@ -60,14 +60,7 @@ export default function TopBar() {
               }`
             }
           >
-            {({ isActive }) => (
-              <>
-                <span className={`num text-[13px] font-medium ${isActive ? 'text-brand-500' : 'text-muted'}`}>
-                  {item.key}
-                </span>
-                {item.label}
-              </>
-            )}
+            {item.label}
           </NavLink>
         ))}
       </nav>

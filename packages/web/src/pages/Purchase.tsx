@@ -170,9 +170,10 @@ export default function Purchase() {
         <label className="flex items-center gap-2.5 text-[17px] text-ink-2">
           业务日期
           <input
+            type="date"
             value={bizDate}
             onChange={(e) => setBizDate(e.target.value)}
-            className="num h-12 w-[168px] rounded-[10px] border border-line bg-card px-4 text-[19px]"
+            className="num h-12 w-[200px] rounded-[10px] border border-line bg-card px-4 text-[19px]"
           />
         </label>
       </div>

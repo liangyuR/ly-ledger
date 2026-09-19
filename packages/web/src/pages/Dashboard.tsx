@@ -89,16 +89,12 @@ export default function Dashboard() {
 
       <div className="flex shrink-0 gap-5">
         <Figure label="今日营业额" value={`¥${d?.todayRevenue ?? '—'}`} sub={d?.date} />
-        <Figure label="今日毛利" value={`¥${d?.todayProfit ?? '—'}`} tone="brand" />
-        <Figure label="本月毛利" value={`¥${d?.monthProfit ?? '—'}`} tone="brand" />
+        <Figure label="今日毛利" value={`¥${d?.todayProfit ?? '—'}`} sub="不含房租、水电、人工" tone="brand" />
+        <Figure label="本月毛利" value={`¥${d?.monthProfit ?? '—'}`} sub="不含房租、水电、人工" tone="brand" />
         <Figure label="库存金额" value={`¥${d?.inventoryValue ?? '—'}`} sub="按加权成本" />
       </div>
 
-      <div className="-mt-2 shrink-0 text-[16px] text-muted">
-        毛利 = 售价 − 成本，<strong className="font-semibold text-ink-2">不含房租、水电、人工</strong>
-      </div>
-
-      <div className="flex min-h-0 gap-5">
+      <div className="flex h-80 shrink-0 gap-5">
         <Card
           title="待收欠款"
           extra={

@@ -5,18 +5,14 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
+    // Tauri 按这个端口连开发服务器，被占了就该报错，不能悄悄换一个
     port: 5173,
-    // 开发期把 /api 转给后端。上线时前端产物由后端一并托管，同域，没有跨域问题
-    proxy: {
-      '/api': { target: 'http://127.0.0.1:13000', changeOrigin: false },
-      // /health 也要转，否则前端探活会拿到 Vite 返回的 index.html
-      '/health': { target: 'http://127.0.0.1:13000', changeOrigin: false },
-    },
+    strictPort: true,
   },
   build: {
-    // 产物交给后端的静态托管
+    // 产物由 Tauri 编进 exe（tauri.conf.json 的 frontendDist）
     outDir: 'dist',
-    // 便携包要小：不生成 sourcemap，它比代码本身还大
+    // 包要小：不生成 sourcemap，它比代码本身还大
     sourcemap: false,
   },
 });

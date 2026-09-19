@@ -1,0 +1,47 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "烟酒台账",
+  "version": "0.1.0",
+  "identifier": "com.ly-ledger.desktop",
+  "mainBinaryName": "烟酒台账",
+  "build": {
+    "frontendDist": "../web/dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "npm run dev -w @ly-ledger/web",
+    "beforeBuildCommand": "npm run build -w @ly-ledger/web"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "烟酒台账",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1100,
+        "minHeight": 700,
+        "maximized": true,
+        "resizable": true,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": ["icons/icon.ico"],
+    "publisher": "ly-ledger",
+    "copyright": "",
+    "shortDescription": "烟酒店进销存台账",
+    "longDescription": "单店烟酒店进销存台账：卖货、进货、收款、欠款、毛利报表。本地单机，数据在你自己的电脑上。",
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["SimpChinese"],
+        "displayLanguageSelector": false
+      }
+    }
+  }
+}

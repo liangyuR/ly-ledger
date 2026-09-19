@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "单机单人台账。只开保存文件对话框和打开文件夹两项，其余一律不给。",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "dialog:allow-save",
+    "dialog:allow-message",
+    "opener:allow-reveal-item-in-dir"
+  ]
+}

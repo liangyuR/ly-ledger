@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 
-import { api, endpoints } from '../api/client';
+import { api, endpoints, exportXlsx } from '../api/client';
 import { Card } from '../components/Card';
 import { useHotkeys } from '../hooks/useHotkeys';
 
@@ -94,13 +94,11 @@ export default function Collect() {
   return (
     <div className="flex min-h-0 grow flex-col gap-5">
       <div className="flex shrink-0 items-center gap-4">
-        <h1 className="m-0 text-2xl font-semibold">收款</h1>
+        <h1 className="m-0 text-2xl font-semibold">挂账归还</h1>
         <span className="grow" />
         <button
           type="button"
-          onClick={() => {
-            window.location.href = '/api/customers/export-debts';
-          }}
+          onClick={() => void exportXlsx('debts')}
           className="h-12 rounded-[10px] border border-line bg-card px-5 text-[17px]"
         >
           导出欠款表

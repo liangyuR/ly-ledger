@@ -403,9 +403,10 @@ export default function SaleDetail() {
                 </label>
                 <input
                   id="rd"
+                  type="date"
                   value={returnDate}
                   onChange={(e) => setReturnDate(e.target.value)}
-                  className="num h-11 w-40 rounded-lg border border-line px-3"
+                  className="num h-11 w-48 rounded-lg border border-line px-3"
                 />
                 <span className="text-[16px] text-muted">
                   不填数量 = 整单退。冲减记在这一天，不动原单那天的营业额

@@ -1,6 +1,6 @@
 # ly-ledger · 烟酒台账
 
-给单店烟酒店老板用的进销存台账系统。Fastify + SQLite 作后端，自研极简 PC 前端，**本地单机运行**。
+给单店烟酒店老板用的进销存台账系统。Rust + SQLite 作后端，自研极简前端，**本地单机的 Windows 桌面应用**。
 
 ## 一句话定位
 
@@ -16,8 +16,8 @@
 | 维度 | 结论 |
 |---|---|
 | 使用者 | 单店老板一人，无店员、无多角色权限 |
-| 终端 | **纯 PC 桌面 Web**（柜台电脑），键盘流操作 |
-| 部署 | **本地单机**，Windows 免安装便携包，不上 Docker |
+| 终端 | **PC 桌面应用**（柜台电脑），键盘流操作 |
+| 部署 | **本地单机**，一个 Windows 桌面程序，不上 Docker、不起服务、不占端口 |
 | 录入方式 | 全手工录入，**不做扫码** |
 | 记账时机 | 实时为主，支持事后补录（业务日期可改） |
 | 交付形态 | 自用 / 给特定一两家店，不做多租户 |
@@ -26,59 +26,44 @@
 
 ## 技术栈
 
-- **后端**：Fastify + better-sqlite3 + Zod
+- **外壳**：Tauri 2（系统自带的 WebView2，不打包浏览器内核）
+- **后端**：Rust + rusqlite（SQLite 静态编进 exe）+ serde
 - **前端**：Vite + React 19 + TypeScript + Tailwind CSS 4 + TanStack Query
+- **通信**：Tauri `invoke` 命令，**没有 HTTP、没有端口、没有 token**
 - **字体**：思源黑体 Noto Sans SC + IBM Plex Mono，**随包发布，不走 CDN**
 - **数据库**：SQLite（单文件，备份 = 复制文件）
-- **运行**：便携版 Node + nssm 注册 Windows 服务，Edge `--app` 模式作桌面入口
+- **运行**：双击一个 exe。没有后台服务、没有开机自启脚本、没有崩溃守护进程
+
+> 一期到 M7 是 Fastify + Node 的 HTTP 后端，实测跑通过。换成 Tauri 的账见
+> [03-技术架构](docs/03-技术架构.md#后端二次选型tauri--rust取代-fastify--node)。
+> **数据模型一字未改**，旧的 `ledger.db` 直接拿过来就能用。
 
 ## 本地开发
 
-前置：Node ≥ 20（实测 24.19.0）。
+前置：Node ≥ 20（实测 24.19.0）、Rust stable（实测 1.97.1）、
+Windows 上还要有 MSVC 生成工具和 WebView2 运行时（Win11 自带）。
 
 ```bash
 npm install
-cp packages/server/.env.example packages/server/.env
-npm start
-```
-
-访问 `http://127.0.0.1:13000/health`。启动时会自动执行未跑过的迁移，不需要单独的建表步骤。
-
-### 开发期：一条命令拉起前后端
-
-```
 npm run dev
 ```
 
-然后打开 **http://localhost:5173**，改代码自动刷新。Ctrl-C 一次把两个都停掉。
-
-开发期是**两个进程**：后端 13000，Vite 5173 负责热更新并把 `/api` 转给后端
-（`vite.config.ts` 的 proxy）。**上线只有一个** —— 后端把 `packages/web/dist`
-托在 `/` 上，同域，没有跨域问题。所以便携包里只跑一个 `node`。
-
-想只跑一个进程、不要热更新（比如验便携包的行为）：
-
-```
-npm run web:build && npm start
-```
-
-这时前后端都在 **http://127.0.0.1:13000**，跟装到柜台电脑上一模一样。
+一条命令：Vite 起在 5173，Tauri 编译后开窗口连上去，改前端代码热更新，
+改 Rust 代码存盘后自动重编重启。**不需要 .env，不需要单独建表** ——
+数据库连接和迁移在开窗之前跑完，跑不过就不开窗。
 
 ### 常用命令
 
 | 命令 | 作用 |
 |---|---|
-| `npm run dev` | **前后端一起起**，热重载，开 5173 |
-| `npm start` | 只起后端（会托管已构建的前端产物），开 13000 |
-| `npm run dev:server` / `dev:web` | 分开起，调试某一边时用 |
-| `npm run migrate` | 只跑迁移，打印当前表 |
-| `npm test` | 单测 + 端到端（154 项），用内存库，不碰真实数据 |
-| `npm run verify:model` | **拿约束撞一遍数据模型**，跑在临时库上，不碰真实数据 |
-| `npm run typecheck` | 类型检查 |
-| `npm run web:build` | 构建前端产物，后端启动时会自动托管 |
-| `npm run package` | 打 Windows 便携包到 `packaging/out/` |
+| `npm run dev` | **起开发版应用**，前端热更新，Rust 改了自动重编 |
+| `npm run build` | 出 Windows 安装包与 exe |
+| `npm test` | Rust 单测 + 端到端 + **拿约束撞一遍数据模型**，150 项，用内存库，不碰真实数据 |
+| `npm run typecheck` | 前端类型检查 + Rust 全量检查 |
+| `npm run web:dev` / `web:build` | 只动前端时用 |
 
-数据库是单文件 `packages/server/data/ledger.db`。想推倒重来就删掉它再启动一次。
+数据库是单文件 `data/ledger.db`，就在 exe 旁边（开发期在 `packages/desktop/data/`）。
+想推倒重来就删掉它再启动一次。想放别处，设环境变量 `LY_LEDGER_DATA`。
 
 > 没有后台管理界面 —— 这是有意的，见 [03](docs/03-技术架构.md#没有后台管理界面)。要查底层数据，用任意 SQLite 客户端直接打开那个文件。
 
@@ -138,6 +123,7 @@ UI 设计稿（15 块画板，1920×1080）：**https://claude.ai/artifact/NJ9eA
 | M6 | ✅ 利润报表：毛利趋势 / 单品排行 / 滞销预警 + 五处 Excel 导出 |
 | M7 | ✅ Windows 便携包：整目录可拷、无窗口后台运行、开机自启，实测 8.9 MB |
 | 补 | ✅ 崩溃守护（自动重启 + 崩溃循环保护）· 单据详情与改单页 |
+| M8 | ✅ **换壳 Tauri + Rust**：后端整个重写，前端只动了 `api/client.ts` 一个文件。exe 17.0 MB（SEA 版是 98.2 MB），不再有服务、端口、自启、守护进程 |
 
 > M5 排在报表之前是有意的。本地部署的头号风险是数据丢失——硬盘坏了就是几年台账全没，而老板绝不会自己备份。**备份是产品功能，不是运维事项。**
 
