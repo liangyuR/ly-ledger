@@ -2,6 +2,7 @@ import './env';
 
 import { buildApp } from './app';
 import { migrate } from './db/migrate';
+import { scheduleBackups } from './services/backup-schedule';
 
 async function main() {
   // 启动即迁移。单机部署没有独立的运维步骤，
@@ -12,6 +13,8 @@ async function main() {
   if (applied.length) {
     app.log.info({ applied }, '已执行迁移');
   }
+
+  scheduleBackups(app.log);
 
   await app.listen({
     port: Number(process.env.APP_PORT) || 13000,

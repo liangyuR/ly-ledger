@@ -1,6 +1,26 @@
+import { useQuery } from '@tanstack/react-query';
 import { NavLink, useNavigate } from 'react-router-dom';
 
+import { api } from '../api/client';
 import { useHotkeys } from '../hooks/useHotkeys';
+
+interface BackupStatus {
+  lastBackupAt: string | null;
+  ageDays: number | null;
+  stale: boolean;
+  count: number;
+}
+
+/** "今天 02:00" / "3 天前" —— 老板要的是"多久没备份了"，不是时间戳 */
+function describe(s: BackupStatus | undefined): string {
+  if (!s) return '…';
+  if (!s.lastBackupAt) return '从没备份过';
+  const t = new Date(s.lastBackupAt);
+  const hhmm = `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`;
+  if (s.ageDays === 0) return `今天 ${hhmm}`;
+  if (s.ageDays === 1) return `昨天 ${hhmm}`;
+  return `${s.ageDays} 天前`;
+}
 
 const NAV = [
   { to: '/sell', key: 'F1', label: '卖货' },
@@ -10,8 +30,15 @@ const NAV = [
   { to: '/products', key: 'F5', label: '商品' },
 ];
 
-export default function TopBar({ backupAt }: { backupAt?: string }) {
+export default function TopBar() {
   const navigate = useNavigate();
+
+  const backup = useQuery({
+    queryKey: ['backupStatus'],
+    queryFn: () => api.get<BackupStatus>('/api/backup/status'),
+    refetchInterval: 5 * 60_000,
+  });
+  const stale = backup.data?.stale ?? false;
 
   // 功能键在输入框里也要响应 —— 手停在数量框上按 F2 必须直接跳进货
   useHotkeys(Object.fromEntries(NAV.map((n) => [n.key, () => navigate(n.to)])));
@@ -45,11 +72,20 @@ export default function TopBar({ backupAt }: { backupAt?: string }) {
         ))}
       </nav>
 
-      {/* 备份状态常驻可见。静默失败的备份等于没有备份（docs/03） */}
-      <div className="flex shrink-0 items-center gap-2.5 text-[17px] whitespace-nowrap text-ink-2">
-        <span className="block size-2.5 rounded-full bg-brand-500" />
-        备份　<span className="num">{backupAt ?? '未配置'}</span>
-      </div>
+      {/* 备份状态常驻可见，超过 3 天标红。静默失败的备份等于没有备份（docs/03） */}
+      <button
+        type="button"
+        onClick={() => navigate('/')}
+        className={`flex shrink-0 items-center gap-2.5 rounded-[10px] px-3 py-2 text-[17px] whitespace-nowrap ${
+          stale ? 'bg-danger-50 text-danger' : 'text-ink-2'
+        }`}
+        title={stale ? '超过 3 天没有成功备份了' : undefined}
+      >
+        <span className={`block size-2.5 rounded-full ${stale ? 'bg-danger' : 'bg-brand-500'}`} />
+        备份　<span className="num">{describe(backup.data)}</span>
+        {/* 不只靠颜色：标红时同时给出文字 */}
+        {stale && <span className="font-semibold">该备份了</span>}
+      </button>
     </header>
   );
 }

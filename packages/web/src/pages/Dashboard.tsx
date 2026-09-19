@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 
 import { api } from '../api/client';
+import BackupCard from '../components/BackupCard';
 import { Card, Figure } from '../components/Card';
 
 interface Dashboard {
@@ -154,6 +155,8 @@ export default function Dashboard() {
           </div>
         </Card>
       </div>
+
+      <BackupCard />
 
       <Card
         title="今日流水"

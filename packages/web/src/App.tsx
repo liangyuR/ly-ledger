@@ -12,7 +12,7 @@ export default function App() {
   return (
     <div className="flex h-screen flex-col overflow-hidden">
       <TopBar />
-      <main className="flex min-h-0 grow flex-col gap-5 px-10 pt-8 pb-9">
+      <main className="flex min-h-0 grow flex-col gap-5 overflow-y-auto px-10 pt-8 pb-9">
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/sell" element={<Sell />} />

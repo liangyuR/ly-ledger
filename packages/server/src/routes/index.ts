@@ -9,6 +9,13 @@ import { checkout } from '../services/sales';
 import { toPinyin } from '../services/pinyin';
 import { importProductList, parseProductList } from '../services/product-import';
 import { rebuildAllocations, readDebt } from '../services/rebuild-allocations';
+import {
+  backupStatus,
+  copyLatestToUsb,
+  listBackups,
+  removableDrives,
+  runBackup,
+} from '../services/backup';
 import { dashboard, frequentProducts, listDebts, today } from '../services/reports';
 import { importSeedBrands, listSeedBrands } from '../services/seed-import';
 import {
@@ -273,6 +280,33 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       .run(name, req.body?.phone ?? '').lastInsertRowid;
     reply.status(201);
     return { ok: true, supplierId: Number(id) };
+  });
+
+  // ── 备份 ────────────────────────────────────────────────
+  // 备份状态常驻在顶栏，超过 3 天没成功备份就标红 ——
+  // 静默失败的备份等于没有备份（docs/03）
+
+  app.get('/api/backup/status', async () => {
+    const s = backupStatus();
+    return { ok: true, ...s, files: listBackups().slice(0, 10) };
+  });
+
+  app.post('/api/backup/now', async () => {
+    const r = await runBackup();
+    if (!r.ok) throw new Error(r.error ?? '备份失败');
+    return { ok: true, file: r.file, sizeBytes: r.sizeBytes };
+  });
+
+  app.get('/api/backup/drives', async () => {
+    return { ok: true, drives: removableDrives() };
+  });
+
+  app.post<{ Body: { drive?: string } }>('/api/backup/to-usb', async (req) => {
+    const drive = req.body?.drive;
+    if (!drive) throw new Error('先选一个盘符');
+    const r = copyLatestToUsb(drive);
+    if (!r.ok) throw new Error(r.error ?? '复制失败');
+    return { ok: true, target: r.target };
   });
 
   // ── 看板与欠款列表 ────────────────────────────────────────
