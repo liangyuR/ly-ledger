@@ -1,6 +1,6 @@
 # ly-ledger · 烟酒台账
 
-给单店烟酒店老板用的进销存台账系统。NocoBase 作后端，自研极简 PC 前端，**本地单机运行**。
+给单店烟酒店老板用的进销存台账系统。Fastify + SQLite 作后端，自研极简 PC 前端，**本地单机运行**。
 
 ## 一句话定位
 
@@ -26,7 +26,7 @@
 
 ## 技术栈
 
-- **后端**：NocoBase 2.x（Apache-2.0 部分）+ 自研业务插件 `plugin-ledger`
+- **后端**：Fastify + better-sqlite3 + Zod
 - **前端**：Vite + React 18 + TypeScript + Tailwind CSS + TanStack Query
 - **字体**：思源黑体 Noto Sans SC + IBM Plex Mono，**随包发布，不走 CDN**
 - **数据库**：SQLite（单文件，备份 = 复制文件）
@@ -34,36 +34,36 @@
 
 ## 本地开发
 
-前置：Node ≥ 20（实测 24.19.0），npm ≥ 10。**不要用 pnpm** —— NocoBase 的 registry 元数据不合规范，pnpm v12 解析不了，详见 [03-技术架构](docs/03-技术架构.md#包管理器npm不是-pnpm)。
+前置：Node ≥ 20（实测 24.19.0）。
 
 ```bash
 npm install
 cp packages/server/.env.example packages/server/.env
+npm start
 ```
 
-`.env` 里的 `APP_KEY` 必须换成随机值：
+访问 `http://127.0.0.1:13000/health`。启动时会自动执行未跑过的迁移，不需要单独的建表步骤。
 
-```bash
-node -e "console.log(require('crypto').randomBytes(256).toString('base64'))"
-```
+常用命令：
 
-然后建表、启动：
+| 命令 | 作用 |
+|---|---|
+| `npm start` | 启动服务 |
+| `npm run dev` | 带热重载启动 |
+| `npm run migrate` | 只跑迁移，打印当前表 |
+| `npm run verify:model` | **拿真数据撞一遍数据模型的约束**，全程事务、跑完回滚 |
+| `npm run typecheck` | 类型检查 |
 
-```bash
-npm run server:install
-npm run server:start
-```
+数据库是单文件 `packages/server/data/ledger.db`。想推倒重来就删掉它再启动一次。
 
-访问 `http://localhost:13000`。NocoBase 后台在 `/admin`，用 `.env` 里的 `INIT_ROOT_*` 登录 —— **那是给维护者查数据、改错账用的，不是给店主用的**（店主那侧无密码自动登录，见 03）。
-
-数据库是单文件 `packages/server/data/ledger.db`。想推倒重来就删掉它再跑一次 `server:install`。
+> 没有后台管理界面 —— 这是有意的，见 [03](docs/03-技术架构.md#没有后台管理界面)。要查底层数据，用任意 SQLite 客户端直接打开那个文件。
 
 ## 文档
 
 | 文档 | 内容 |
 |---|---|
 | [01-背景与范围](docs/01-背景与范围.md) | 业务背景、用户场景、一期范围、五条设计红线、验收标准 |
-| [02-数据模型](docs/02-数据模型.md) | 8 张表字段定义、移动加权成本算法、FIFO 核销规则 |
+| [02-数据模型](docs/02-数据模型.md) | 11 张表字段定义、整数金额约定、移动加权成本算法、FIFO 核销规则 |
 | [03-技术架构](docs/03-技术架构.md) | 选型决策记录、API 设计、Windows 打包、备份与恢复 |
 | [04-界面设计](docs/04-界面设计.md) | 交互原则、键盘流、页面布局、快捷键、视觉规范 |
 | [05-变更与撤销](docs/05-变更与撤销.md) | 作废 / 修改 / 退货、核销重算、预收、部分付、抹零 |
@@ -101,8 +101,8 @@ UI 设计稿（11 块画板，1920×1080）：**https://claude.ai/artifact/NJ9eA
 
 | 阶段 | 内容 |
 |---|---|
-| M0 | 环境搭建，NocoBase + SQLite 跑起来 |
-| M1 | 8 张表在 `plugin-ledger` 中定义完成，后台可增删改查 |
+| M0 | ✅ 环境搭建，Fastify + SQLite 跑起来 |
+| M1 | ✅ 11 张表建表完成，约束（不变量）有验证脚本兜底 |
 | M1.5 | 商品入库三条路：预置目录按品牌勾选 · 手工清单/Excel 批量导入 · 卖货页即时新建 |
 | M2 | 正向事务 action：`sales:checkout` / `purchases:receive` / `payments:collect` |
 | M2.5 | **逆向 action**：作废 / 修改 / 退货 + 核销重算。含成本算法与 FIFO 单测 |

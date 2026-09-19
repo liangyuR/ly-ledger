@@ -2,43 +2,25 @@
   "name": "@ly-ledger/server",
   "version": "0.1.0",
   "private": true,
-  "description": "NocoBase 作 headless 后端 + 运维后台",
+  "description": "烟酒台账后端 —— Fastify + SQLite，本地单机",
   "main": "src/index.ts",
   "scripts": {
-    "nb": "tsx src/index.ts",
-    "app:install": "tsx src/index.ts install",
-    "app:upgrade": "tsx src/index.ts upgrade",
-    "start": "tsx src/index.ts start",
-    "dev": "tsx src/index.ts start"
+    "migrate": "tsx src/db/run-migrate.ts",
+    "start": "tsx src/index.ts",
+    "dev": "tsx watch src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "verify:model": "tsx src/db/verify-invariants.ts"
   },
   "dependencies": {
-    "@nocobase/server": "2.2.15",
-
-    "@nocobase/plugin-error-handler": "2.2.15",
-    "@nocobase/plugin-data-source-main": "2.2.15",
-    "@nocobase/plugin-data-source-manager": "2.2.15",
-    "@nocobase/plugin-ui-schema-storage": "2.2.15",
-    "@nocobase/plugin-ui-layout": "2.2.15",
-    "@nocobase/plugin-flow-engine": "2.2.15",
-    "@nocobase/plugin-client": "2.2.15",
-    "@nocobase/plugin-acl": "2.2.15",
-    "@nocobase/plugin-auth": "2.2.15",
-    "@nocobase/plugin-users": "2.2.15",
-    "@nocobase/plugin-system-settings": "2.2.15",
-    "@nocobase/plugin-field-sort": "2.2.15",
-    "@nocobase/plugin-localization": "2.2.15",
-
-    "@nocobase/plugin-action-export": "2.2.15",
-    "@nocobase/plugin-action-import": "2.2.15",
-    "@nocobase/plugin-backups": "2.2.15",
-    "@nocobase/plugin-api-doc": "2.2.15",
-    "@nocobase/plugin-api-keys": "2.2.15",
-
+    "better-sqlite3": "^13.0.3",
     "dotenv": "^16.4.7",
-    "sqlite3": "^6.0.1"
+    "fastify": "^5.12.5",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
-    "tsx": "^4.19.2",
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.10.5",
+    "tsx": "^4.23.13",
     "typescript": "^5.7.3"
   }
 }

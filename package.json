@@ -10,12 +10,11 @@
     "packages/*"
   ],
   "scripts": {
-    "server": "npm run -w @ly-ledger/server",
-    "server:install": "npm run app:install -w @ly-ledger/server",
-    "server:start": "npm run start -w @ly-ledger/server"
+    "migrate": "npm run migrate -w @ly-ledger/server",
+    "start": "npm run start -w @ly-ledger/server",
+    "dev": "npm run dev -w @ly-ledger/server",
+    "typecheck": "npm run typecheck -w @ly-ledger/server",
+    "verify:model": "npm run verify:model -w @ly-ledger/server"
   },
-  "license": "UNLICENSED",
-  "overrides": {
-    "@nocobase/client": "2.2.15"
-  }
+  "license": "UNLICENSED"
 }

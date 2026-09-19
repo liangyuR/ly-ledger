@@ -1,30 +1,26 @@
 import './env';
 
-import { Application, Gateway } from '@nocobase/server';
-import config from './config';
+import { buildApp } from './app';
+import { migrate } from './db/migrate';
 
-const app = new Application(config);
+async function main() {
+  // 启动即迁移。单机部署没有独立的运维步骤，
+  // 升级覆盖 app 后第一次启动就得把表结构带上来。
+  const { applied } = migrate();
 
-if (require.main === module) {
-  const command = process.argv[2];
-
-  if (command === 'start') {
-    /**
-     * Application.start() 只做加载和启动，**不绑端口** ——
-     * HTTP 监听在 Gateway 手里，平时由 NocoBase 自己的 CLI 拉起来。
-     * 本项目直连 Application、绕开了那个 CLI，所以必须自己 run 一遍，
-     * 否则进程活着、日志也打印 "app has been started"，但没有任何人监听端口。
-     */
-    app.runAsCLI().then(() => {
-      Gateway.getInstance().start({
-        port: Number(process.env.APP_PORT) || 13000,
-        // 只监听回环地址。服务跑在柜台电脑上，不对局域网暴露（见 docs/03 认证一节）。
-        host: process.env.APP_HOST || '127.0.0.1',
-      });
-    });
-  } else {
-    app.runAsCLI();
+  const app = buildApp();
+  if (applied.length) {
+    app.log.info({ applied }, '已执行迁移');
   }
+
+  await app.listen({
+    port: Number(process.env.APP_PORT) || 13000,
+    // 只监听回环地址：柜台电脑，不对局域网暴露。
+    host: process.env.APP_HOST || '127.0.0.1',
+  });
 }
 
-export default app;
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
