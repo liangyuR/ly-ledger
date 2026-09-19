@@ -19,6 +19,18 @@ interface CartLine {
   amountCents: number;
 }
 
+interface Customer {
+  id: number;
+  name: string;
+}
+
+const METHODS = [
+  { key: 'cash', label: '现金' },
+  { key: 'wechat', label: '微信' },
+  { key: 'alipay', label: '支付宝' },
+  { key: 'transfer', label: '转账' },
+] as const;
+
 interface FrequentItem extends Product {
   priceBase: string | null;
   pricePack: string | null;
@@ -51,8 +63,19 @@ export default function Sell() {
   const [discount, setDiscount] = useState('0');
   const [flash, setFlash] = useState<{ tone: 'ok' | 'bad'; text: string } | null>(null);
 
+  /** cart = 正常结账；credit = F9 挂账；partial = F7 部分付 */
+  const [mode, setMode] = useState<'cart' | 'credit' | 'partial'>('cart');
+  const [custQuery, setCustQuery] = useState('');
+  const [customer, setCustomer] = useState<Customer | null>(null);
+  const [partialAmount, setPartialAmount] = useState('');
+  const [partialMethod, setPartialMethod] = useState<(typeof METHODS)[number]['key']>('cash');
+
+  /** 搜不到时就地建商品。商品库不全不能阻塞记账（docs/01） */
+  const [creating, setCreating] = useState<{ name: string; unit: string; price: string } | null>(null);
+
   const searchRef = useRef<HTMLInputElement>(null);
   const qtyRef = useRef<HTMLInputElement>(null);
+  const custRef = useRef<HTMLInputElement>(null);
 
   const search = useQuery({
     queryKey: ['products', query],
@@ -65,9 +88,18 @@ export default function Sell() {
     queryFn: () => api.get<{ items: FrequentItem[] }>('/api/products/frequent'),
   });
 
+  const customers = useQuery({
+    queryKey: ['customers', custQuery],
+    queryFn: () => api.get<{ items: Customer[] }>(`/api/customers?q=${encodeURIComponent(custQuery)}`),
+    enabled: mode !== 'cart',
+  });
+
   const candidates = query.trim() ? (search.data?.items ?? []) : [];
 
   useEffect(() => setHighlight(0), [query]);
+  useEffect(() => {
+    if (mode !== 'cart') custRef.current?.focus();
+  }, [mode]);
   useEffect(() => {
     searchRef.current?.focus();
   }, []);
@@ -131,12 +163,56 @@ export default function Sell() {
     }
   }
 
+  const createProduct = useMutation({
+    mutationFn: (body: unknown) => api.post<{ productId: number }>('/api/products', body),
+    onSuccess: (r, vars) => {
+      const v = vars as { name: string; baseUnit: string; priceBaseYuan: string };
+      // 建好直接加进这笔单，不打断这笔生意
+      setCart((prev) => [
+        ...prev,
+        {
+          key: `${r.productId}-new-${Date.now()}`,
+          productId: r.productId,
+          name: v.name,
+          unit: 'base',
+          unitLabel: v.baseUnit,
+          qty: '1',
+          unitPriceYuan: v.priceBaseYuan,
+          amountCents: lineAmountCents('1', yuanToCents(v.priceBaseYuan)),
+        },
+      ]);
+      setCreating(null);
+      setFlash({ tone: 'ok', text: `建好了「${v.name}」，已加进这笔单` });
+      qc.invalidateQueries({ queryKey: ['products'] });
+      qc.invalidateQueries({ queryKey: ['frequent'] });
+      backToSearch();
+    },
+    onError: (e) => setFlash({ tone: 'bad', text: (e as Error).message }),
+  });
+
+  function submitNewProduct() {
+    if (!creating) return;
+    if (!creating.price.trim()) {
+      setFlash({ tone: 'bad', text: '填个售价就能开单了，进价以后进货时再说' });
+      return;
+    }
+    createProduct.mutate({
+      name: creating.name,
+      baseUnit: creating.unit,
+      priceBaseYuan: creating.price,
+    });
+  }
+
   const checkout = useMutation({
     mutationFn: (body: unknown) => endpoints.checkout(body),
     onSuccess: (r) => {
       setFlash({ tone: 'ok', text: `完成　应收 ¥${r.total}　毛利 ¥${r.grossProfit}` });
       setCart([]);
       setDiscount('0');
+      setMode('cart');
+      setCustomer(null);
+      setCustQuery('');
+      setPartialAmount('');
       qc.invalidateQueries({ queryKey: ['frequent'] });
       qc.invalidateQueries({ queryKey: ['dashboard'] });
       backToSearch();
@@ -162,12 +238,50 @@ export default function Sell() {
     });
   }
 
+  function openCredit(next: 'credit' | 'partial') {
+    if (cart.length === 0) {
+      setFlash({ tone: 'bad', text: '还没选商品' });
+      return;
+    }
+    setFlash(null);
+    setMode(next);
+  }
+
+  function submitCredit() {
+    if (!customer) {
+      setFlash({ tone: 'bad', text: '先选一个客户' });
+      return;
+    }
+    checkout.mutate({
+      bizDate,
+      settleType: 'credit',
+      customerId: customer.id,
+      discountYuan: discountCents ? centsToYuan(discountCents) : undefined,
+      items: cart.map((l) => ({
+        productId: l.productId,
+        unit: l.unit,
+        qty: l.qty,
+        unitPriceYuan: l.unitPriceYuan,
+      })),
+      // 部分付不是第三种结算方式：一张挂账单 + 一笔同日收款
+      partialPay:
+        mode === 'partial' && partialAmount.trim()
+          ? { amountYuan: partialAmount, method: partialMethod }
+          : undefined,
+    });
+  }
+
   useHotkeys({
-    F8: submitCash,
-    F9: () => setFlash({ tone: 'bad', text: '挂账在下一步做（需要客户搜索）' }),
-    F7: () => setFlash({ tone: 'bad', text: '部分付在下一步做' }),
+    F8: () => (mode === 'cart' ? submitCash() : submitCredit()),
+    F9: () => openCredit('credit'),
+    F7: () => openCredit('partial'),
     Escape: () => {
-      if (pending) backToSearch();
+      if (mode !== 'cart') {
+        setMode('cart');
+        setCustomer(null);
+        setCustQuery('');
+      } else if (creating) setCreating(null);
+      else if (pending) backToSearch();
       else if (cart.length) setCart([]);
     },
   });
@@ -197,7 +311,9 @@ export default function Sell() {
       e.preventDefault();
       const hit = candidates[highlight];
       if (hit) pick(hit);
-      else if (query.trim()) setFlash({ tone: 'bad', text: `没找到「${query}」，就地新建在下一步做` });
+      else if (query.trim()) {
+        setCreating({ name: query.trim(), unit: '瓶', price: '' });
+      }
     }
   }
 
@@ -276,6 +392,57 @@ export default function Sell() {
               <div className="border-t border-line px-5 py-3 text-[16px] text-muted">
                 ↑↓ 选择　Enter 加入　Tab 切换{candidates[0]?.pack_unit ?? '包装'}/
                 {candidates[0]?.base_unit ?? '单位'}
+              </div>
+            </div>
+          )}
+
+          {creating && (
+            <div className="mt-4 rounded-xl border border-dashed border-line bg-page px-6 py-5">
+              <div className="text-[20px]">没找到「{creating.name}」</div>
+              <div className="mt-1.5 text-[17px] text-ink-2">
+                直接建，建完自动加进这笔单 —— 不用离开这个页面
+              </div>
+              <div className="mt-4 flex items-end gap-4">
+                <label className="flex flex-col gap-2 text-[16px] text-ink-2">
+                  商品名
+                  <input
+                    value={creating.name}
+                    onChange={(e) => setCreating({ ...creating, name: e.target.value })}
+                    aria-label="新商品名"
+                    className="h-13 w-56 rounded-[10px] border border-line bg-card px-3 text-[19px]"
+                  />
+                </label>
+                <label className="flex flex-col gap-2 text-[16px] text-ink-2">
+                  单位
+                  <input
+                    value={creating.unit}
+                    onChange={(e) => setCreating({ ...creating, unit: e.target.value })}
+                    aria-label="新商品单位"
+                    className="h-13 w-24 rounded-[10px] border border-line bg-card px-3 text-[19px]"
+                  />
+                </label>
+                <label className="flex flex-col gap-2 text-[16px] text-ink-2">
+                  售价
+                  <input
+                    autoFocus
+                    value={creating.price}
+                    onChange={(e) => setCreating({ ...creating, price: e.target.value })}
+                    onKeyDown={(e) => e.key === 'Enter' && submitNewProduct()}
+                    placeholder="0.00"
+                    aria-label="新商品售价"
+                    className="num h-13 w-32 rounded-[10px] border border-line bg-card px-3 text-[19px]"
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={submitNewProduct}
+                  className="h-13 rounded-[10px] bg-brand-700 px-6 text-[18px] font-semibold text-white"
+                >
+                  建好并加入本单
+                </button>
+              </div>
+              <div className="mt-3 text-[15px] text-muted">
+                拼音自动生成。规格、箱规以后再补，不阻塞这笔生意
               </div>
             </div>
           )}
@@ -418,34 +585,126 @@ export default function Sell() {
             </div>
           )}
 
-          <div className="mt-6 flex flex-col gap-3.5">
-            <button
-              type="button"
-              onClick={submitCash}
-              disabled={checkout.isPending}
-              className="flex h-19 items-center justify-center gap-3 rounded-xl bg-brand-700 text-[22px] font-semibold text-white disabled:opacity-60"
-            >
-              <span className="num text-[14px] font-medium text-[#BFE0D4]">F8</span>
-              {checkout.isPending ? '处理中…' : '现金收讫'}
-            </button>
-            <div className="flex gap-3.5">
+          {mode === 'cart' ? (
+            <div className="mt-6 flex flex-col gap-3.5">
               <button
                 type="button"
-                className="flex h-14 grow items-center justify-center gap-2.5 rounded-xl border border-line bg-card text-[19px] font-semibold"
+                onClick={submitCash}
+                disabled={checkout.isPending}
+                className="flex h-19 items-center justify-center gap-3 rounded-xl bg-brand-700 text-[22px] font-semibold text-white disabled:opacity-60"
               >
-                <span className="num text-[14px] font-medium text-muted">F9</span>挂账
+                <span className="num text-[14px] font-medium text-[#BFE0D4]">F8</span>
+                {checkout.isPending ? '处理中…' : '现金收讫'}
               </button>
+              <div className="flex gap-3.5">
+                <button
+                  type="button"
+                  onClick={() => openCredit('credit')}
+                  className="flex h-14 grow items-center justify-center gap-2.5 rounded-xl border border-line bg-card text-[19px] font-semibold"
+                >
+                  <span className="num text-[14px] font-medium text-muted">F9</span>挂账
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openCredit('partial')}
+                  className="flex h-14 grow items-center justify-center gap-2.5 rounded-xl border border-line bg-card text-[19px] font-semibold"
+                >
+                  <span className="num text-[14px] font-medium text-muted">F7</span>部分付
+                </button>
+              </div>
+              <div className="text-center text-[15px] text-muted">
+                九成单子按 F8 一键完成，不弹窗、不确认
+              </div>
+            </div>
+          ) : (
+            <div className="mt-6 flex flex-col gap-3.5 border-t-2 border-line pt-5">
+              <div className="flex items-baseline gap-3">
+                <h3 className="m-0 text-[19px] font-semibold">挂给谁</h3>
+                <span className="text-[16px] text-muted">Esc 退回现金结账</span>
+              </div>
+
+              <input
+                ref={custRef}
+                value={custQuery}
+                onChange={(e) => setCustQuery(e.target.value)}
+                placeholder="搜客户拼音"
+                aria-label="搜客户"
+                className="h-14 w-full rounded-xl border-2 border-brand-500 bg-card px-4 text-[21px]"
+              />
+
+              <div className="flex flex-wrap gap-2.5">
+                {(customers.data?.items ?? []).slice(0, 6).map((c) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => setCustomer(c)}
+                    className={`h-13 rounded-[10px] border px-5 text-[19px] ${
+                      customer?.id === c.id
+                        ? 'border-brand-700 bg-brand-50 text-brand-900'
+                        : 'border-line'
+                    }`}
+                  >
+                    {c.name}
+                  </button>
+                ))}
+                {(customers.data?.items.length ?? 0) === 0 && (
+                  <span className="text-[17px] text-muted">
+                    没找到客户。先去收款页或后台建一个
+                  </span>
+                )}
+              </div>
+
+              {/* 只有按了 F7 才出现这两行 —— 部分付是第三条路径，不得污染前两条 */}
+              {mode === 'partial' && (
+                <div className="mt-2 flex flex-col gap-3">
+                  <div className="flex items-end gap-4">
+                    <label className="flex flex-col gap-2 text-[16px] text-ink-2">
+                      已收金额
+                      <input
+                        value={partialAmount}
+                        onChange={(e) => setPartialAmount(e.target.value)}
+                        placeholder="0.00"
+                        aria-label="已收金额"
+                        className="num h-13 w-[150px] rounded-[10px] border border-line bg-card px-3 text-[21px]"
+                      />
+                    </label>
+                    <div className="flex gap-2">
+                      {METHODS.map((m) => (
+                        <button
+                          key={m.key}
+                          type="button"
+                          onClick={() => setPartialMethod(m.key)}
+                          className={`h-13 rounded-[10px] border px-4 text-[17px] ${
+                            partialMethod === m.key
+                              ? 'border-brand-700 bg-brand-50 text-brand-900'
+                              : 'border-line'
+                          }`}
+                        >
+                          {m.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {customer && partialAmount.trim() && (
+                    <div className="rounded-xl bg-page px-4 py-3 text-[18px]">
+                      本单 <span className="num">¥{formatYuan(totalCents)}</span>　已收{' '}
+                      <span className="num">¥{partialAmount}</span>　剩余记在{customer.name}账上
+                    </div>
+                  )}
+                </div>
+              )}
+
               <button
                 type="button"
-                className="flex h-14 grow items-center justify-center gap-2.5 rounded-xl border border-line bg-card text-[19px] font-semibold"
+                onClick={submitCredit}
+                disabled={checkout.isPending || !customer}
+                className="mt-2 flex h-19 items-center justify-center gap-3 rounded-xl bg-brand-700 text-[22px] font-semibold text-white disabled:opacity-40"
               >
-                <span className="num text-[14px] font-medium text-muted">F7</span>部分付
+                <span className="num text-[14px] font-medium text-[#BFE0D4]">F8</span>
+                {checkout.isPending ? '处理中…' : '确认'}
               </button>
             </div>
-            <div className="text-center text-[15px] text-muted">
-              九成单子按 F8 一键完成，不弹窗、不确认
-            </div>
-          </div>
+          )}
         </Card>
       </div>
     </div>
