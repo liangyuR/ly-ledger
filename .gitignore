@@ -27,6 +27,7 @@ backup/
 
 # 打包产物
 packaging/out/
+packaging/out-sea/
 packaging/runtime/
 *.zip
 

@@ -19,10 +19,12 @@
     "test": "npm test -w @ly-ledger/server",
     "dev:web": "npm run dev -w @ly-ledger/web",
     "web:build": "npm run build -w @ly-ledger/web",
-    "package": "npm run web:build && node packaging/build.mjs"
+    "package": "npm run web:build && node packaging/build.mjs",
+    "package:sea": "npm run web:build && node packaging/sea.mjs"
   },
   "license": "UNLICENSED",
   "devDependencies": {
-    "esbuild": "^0.28.2"
+    "esbuild": "^0.28.2",
+    "postject": "^1.0.0-alpha.6"
   }
 }
