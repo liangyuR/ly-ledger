@@ -7,8 +7,8 @@
   "build": {
     "frontendDist": "../web/dist",
     "devUrl": "http://localhost:5173",
-    "beforeDevCommand": "npm run dev -w @ly-ledger/web",
-    "beforeBuildCommand": "npm run build -w @ly-ledger/web"
+    "beforeDevCommand": "pnpm --filter @ly-ledger/web dev",
+    "beforeBuildCommand": "pnpm --filter @ly-ledger/web build"
   },
   "app": {
     "windows": [

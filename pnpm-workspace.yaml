@@ -1,0 +1,3 @@
+# pnpm 不看 package.json 的 workspaces 字段，工作区在这里声明
+packages:
+  - 'packages/*'

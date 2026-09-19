@@ -40,12 +40,12 @@
 
 ## 本地开发
 
-前置：Node ≥ 20（实测 24.19.0）、Rust stable（实测 1.97.1）、
+前置：Node ≥ 20（实测 24.19.0）、pnpm（实测 12.4.2）、Rust stable（实测 1.97.1）、
 Windows 上还要有 MSVC 生成工具和 WebView2 运行时（Win11 自带）。
 
 ```bash
-npm install
-npm run dev
+pnpm install
+pnpm dev
 ```
 
 一条命令：Vite 起在 5173，Tauri 编译后开窗口连上去，改前端代码热更新，
@@ -56,11 +56,11 @@ npm run dev
 
 | 命令 | 作用 |
 |---|---|
-| `npm run dev` | **起开发版应用**，前端热更新，Rust 改了自动重编 |
-| `npm run build` | 出 Windows 安装包与 exe |
-| `npm test` | Rust 单测 + 端到端 + **拿约束撞一遍数据模型**，150 项，用内存库，不碰真实数据 |
-| `npm run typecheck` | 前端类型检查 + Rust 全量检查 |
-| `npm run web:dev` / `web:build` | 只动前端时用 |
+| `pnpm dev` | **起开发版应用**，前端热更新，Rust 改了自动重编 |
+| `pnpm build` | 出 Windows 安装包与 exe |
+| `pnpm test` | Rust 单测 + 端到端 + **拿约束撞一遍数据模型**，150 项，用内存库，不碰真实数据 |
+| `pnpm typecheck` | 前端类型检查 + Rust 全量检查 |
+| `pnpm web:dev` / `pnpm web:build` | 只动前端时用 |
 
 数据库是单文件 `data/ledger.db`，就在 exe 旁边（开发期在 `packages/desktop/data/`）。
 想推倒重来就删掉它再启动一次。想放别处，设环境变量 `LY_LEDGER_DATA`。

@@ -6,19 +6,17 @@
   "engines": {
     "node": ">=20"
   },
-  "workspaces": [
-    "packages/*"
-  ],
   "scripts": {
     "dev": "tauri dev",
     "build": "tauri build",
-    "web:dev": "npm run dev -w @ly-ledger/web",
-    "web:build": "npm run build -w @ly-ledger/web",
+    "web:dev": "pnpm --filter @ly-ledger/web dev",
+    "web:build": "pnpm --filter @ly-ledger/web build",
     "test": "cargo test --manifest-path packages/desktop/Cargo.toml",
-    "typecheck": "npm run typecheck -w @ly-ledger/web && cargo check --manifest-path packages/desktop/Cargo.toml --all-targets"
+    "typecheck": "pnpm --filter @ly-ledger/web typecheck && cargo check --manifest-path packages/desktop/Cargo.toml --all-targets"
   },
   "license": "UNLICENSED",
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.1"
-  }
+  },
+  "packageManager": "pnpm@12.4.2"
 }
