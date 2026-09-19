@@ -93,7 +93,19 @@ export default function Collect() {
 
   return (
     <div className="flex min-h-0 grow flex-col gap-5">
-      <h1 className="m-0 shrink-0 text-2xl font-semibold">收款</h1>
+      <div className="flex shrink-0 items-center gap-4">
+        <h1 className="m-0 text-2xl font-semibold">收款</h1>
+        <span className="grow" />
+        <button
+          type="button"
+          onClick={() => {
+            window.location.href = '/api/customers/export-debts';
+          }}
+          className="h-12 rounded-[10px] border border-line bg-card px-5 text-[17px]"
+        >
+          导出欠款表
+        </button>
+      </div>
 
       <div className="flex min-h-0 grow gap-5">
         <Card

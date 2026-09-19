@@ -141,6 +141,15 @@ export default function Products() {
           aria-label="搜商品名或拼音"
           className="h-12 w-72 rounded-[10px] border border-line bg-card px-4 text-[18px]"
         />
+        <button
+          type="button"
+          onClick={() => {
+            window.location.href = '/api/products/export';
+          }}
+          className="h-12 rounded-[10px] border border-line bg-card px-5 text-[17px]"
+        >
+          导出 Excel
+        </button>
       </div>
 
       {flash && <div className="shrink-0 rounded-xl bg-brand-50 px-5 py-3 text-[17px] text-brand-900">{flash}</div>}
@@ -231,6 +240,8 @@ export default function Products() {
             className="num h-40 w-full resize-none rounded-xl border-2 border-line bg-card px-4 py-3 text-[17px] leading-loose"
           />
           <div className="mt-2 text-[15px] leading-relaxed text-muted">
+            上面「导出 Excel」那份同时就是导入模板 —— 导出、填好、再导回来。
+            <br />
             一行一个，两种写法：
             <br />
             <span className="num">名称 - 单位</span>　或

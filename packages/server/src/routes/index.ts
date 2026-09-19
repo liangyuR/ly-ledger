@@ -16,6 +16,20 @@ import {
   removableDrives,
   runBackup,
 } from '../services/backup';
+import {
+  exportDebts,
+  exportProducts,
+  exportRanking,
+  exportSales,
+  exportStale,
+} from '../services/excel';
+import {
+  dailyTrend,
+  inventorySummary,
+  monthlyTrend,
+  productRanking,
+  staleProducts,
+} from '../services/profit-reports';
 import { dashboard, frequentProducts, listDebts, today } from '../services/reports';
 import { importSeedBrands, listSeedBrands } from '../services/seed-import';
 import {
@@ -280,6 +294,88 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       .run(name, req.body?.phone ?? '').lastInsertRowid;
     reply.status(201);
     return { ok: true, supplierId: Number(id) };
+  });
+
+  // ── 利润报表 ─────────────────────────────────────────────
+  // 每个数字都是毛利：售价 − 成本，不含房租水电人工（红线 5）
+
+  app.get<{ Querystring: { month?: string } }>('/api/reports/profit', async (req) => {
+    const db = getDb();
+    const month = req.query.month;
+    const inv = inventorySummary(db);
+
+    return {
+      ok: true,
+      month: month ?? today(db).slice(0, 7),
+      monthly: monthlyTrend(db).map((m) => ({
+        month: m.month,
+        revenue: centsToYuan(m.revenueCents),
+        profit: centsToYuan(m.profitCents),
+        profitCents: m.profitCents,
+        partial: m.partial,
+      })),
+      daily: dailyTrend(db).map((d) => ({
+        date: d.date,
+        revenue: centsToYuan(d.revenueCents),
+        profit: centsToYuan(d.profitCents),
+      })),
+      ranking: productRanking(db, month).map((r) => ({
+        productId: r.productId,
+        name: r.name,
+        qty: milliToQty(r.qtyBaseMilli),
+        revenue: centsToYuan(r.revenueCents),
+        profit: centsToYuan(r.profitCents),
+        profitCents: r.profitCents,
+        margin: r.marginPermille == null ? null : (r.marginPermille / 10).toFixed(1),
+      })),
+      stale: staleProducts(db).map((s) => ({
+        productId: s.productId,
+        name: s.name,
+        qty: `${milliToQty(s.qtyBaseMilli)} ${s.baseUnit}`,
+        value: centsToYuan(s.valueCents),
+        lastSoldDate: s.lastSoldDate,
+        idleDays: s.idleDays,
+      })),
+      inventory: {
+        totalValue: centsToYuan(inv.totalValueCents),
+        skuCount: inv.skuCount,
+        negativeCount: inv.negativeCount,
+      },
+    };
+  });
+
+  // ── Excel 导出 ───────────────────────────────────────────
+  // 一个按钮直接下 .xlsx，不弹导出配置（docs/04）
+
+  function sendXlsx(reply: import('fastify').FastifyReply, out: { filename: string; buffer: Buffer }) {
+    reply
+      .header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+      // 文件名有中文，必须走 RFC 5987 的 filename*，否则浏览器会存成乱码
+      .header(
+        'Content-Disposition',
+        `attachment; filename="export.xlsx"; filename*=UTF-8''${encodeURIComponent(out.filename)}`,
+      )
+      .send(out.buffer);
+  }
+
+  app.get<{ Querystring: { month?: string } }>('/api/reports/export', async (req, reply) => {
+    sendXlsx(reply, await exportSales(getDb(), req.query.month));
+  });
+
+  app.get<{ Querystring: { month?: string } }>('/api/reports/export-ranking', async (req, reply) => {
+    sendXlsx(reply, await exportRanking(getDb(), req.query.month));
+  });
+
+  app.get('/api/reports/export-stale', async (_req, reply) => {
+    sendXlsx(reply, await exportStale(getDb()));
+  });
+
+  app.get('/api/customers/export-debts', async (_req, reply) => {
+    sendXlsx(reply, await exportDebts(getDb()));
+  });
+
+  app.get('/api/products/export', async (_req, reply) => {
+    sendXlsx(reply, await exportProducts(getDb()));
   });
 
   // ── 备份 ────────────────────────────────────────────────
