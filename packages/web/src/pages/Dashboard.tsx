@@ -167,7 +167,20 @@ export default function Dashboard() {
 
       <Card
         title="今日流水"
-        extra={<span className="text-[17px] text-muted">点一行打开单据，可改可退</span>}
+        extra={
+          <span className="flex items-center gap-4 text-[17px] text-muted">
+            点一行打开单据，可改可退
+            {/* 这张表只摆 8 行。今天开了二十单的话，第 9 单往后在这儿根本看不见，
+                所以得有条出路 —— 那边还能翻到别的日子 */}
+            <button
+              type="button"
+              onClick={() => navigate(`/report?tab=docs&period=${d?.date ?? ''}`)}
+              className="text-brand-900 underline decoration-dotted underline-offset-4"
+            >
+              看全部 →
+            </button>
+          </span>
+        }
         className="shrink-0"
       >
         {(d?.recentSales.length ?? 0) === 0 && (

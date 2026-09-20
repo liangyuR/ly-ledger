@@ -332,37 +332,53 @@ pub fn sale_detail(conn: &Connection, id: i64) -> Result<SaleDetail> {
 
 pub struct SaleListRow {
     pub id: i64,
+    /// 业务日期。按月看时一行行跨天，光有时分认不出是哪天
+    pub biz_date: String,
     pub time: String,
     pub summary: String,
     pub total_cents: i64,
     pub settle_type: String,
     pub customer_name: Option<String>,
+    /// 退货单。金额为负，界面上得跟正常单分得开
+    pub is_return: bool,
 }
 
 /// 某天的流水，给看板和单据列表用。
-pub fn list_sales(conn: &Connection, biz_date: &str) -> Result<Vec<SaleListRow>> {
-    let raw: Vec<(i64, String, i64, String, Option<String>)> = {
+/// 某一天或某个月的单据。`period` 是 `2026-09-20` 或 `2026-09`。
+///
+/// 两种都是 biz_date 的前缀，所以一条 LIKE 通吃。前缀没有前导通配符，
+/// biz_date 上那个索引照样用得上。调用方负责先校验它真是个前缀
+/// （`validate::check_day_or_month`）。
+pub fn list_sales(conn: &Connection, period: &str) -> Result<Vec<SaleListRow>> {
+    /// id, 业务日期, 录入时间, 金额, 结算方式, 客户名, 是不是退货单
+    type Raw = (i64, String, String, i64, String, Option<String>, bool);
+
+    let raw: Vec<Raw> = {
         let mut stmt = conn.prepare(
-            "SELECT s.id, s.created_at, s.total_amount_cents, s.settle_type, c.name
+            "SELECT s.id, s.biz_date, s.created_at, s.total_amount_cents, s.settle_type, c.name,
+                    s.return_of_sale_id IS NOT NULL
                FROM sales s LEFT JOIN customers c ON c.id = s.customer_id
-              WHERE s.biz_date = ?1 AND s.voided_at IS NULL
-              ORDER BY s.id DESC",
+              WHERE s.biz_date LIKE ?1 || '%' AND s.voided_at IS NULL
+              -- 按月看时得先按天排。补录的单 id 靠后但日期靠前，只按 id 排会串位
+              ORDER BY s.biz_date DESC, s.id DESC",
         )?;
-        let rows = stmt.query_map([biz_date], |r| {
-            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+        let rows = stmt.query_map([period], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?))
         })?;
         rows.collect::<rusqlite::Result<_>>()?
     };
 
     let mut out = Vec::with_capacity(raw.len());
-    for (id, created_at, total_cents, settle_type, customer_name) in raw {
+    for (id, biz_date, created_at, total_cents, settle_type, customer_name, is_return) in raw {
         out.push(SaleListRow {
             id,
+            biz_date,
             time: created_at.chars().skip(11).take(5).collect(),
             summary: summarize(conn, id)?,
             total_cents,
             settle_type,
             customer_name,
+            is_return,
         });
     }
     Ok(out)

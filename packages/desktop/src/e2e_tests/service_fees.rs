@@ -8,7 +8,7 @@ use super::*;
 
 use crate::services::inventory::stock_overview;
 use crate::services::reports::dashboard;
-use crate::services::service_fees::{list, today_fees, today_total};
+use crate::services::service_fees::{fees_in, list, total_in};
 
 /// 迁移里打底的那个桌子费。
 fn table_fee(conn: &Connection) -> i64 {
@@ -167,10 +167,10 @@ fn 当天流水带作废痕迹合计不含作废的() {
     let wrong = charge(&mut conn, "2026-09-20", "600");
     do_void_sale(&mut conn, wrong).unwrap();
 
-    let rows = today_fees(&conn, "2026-09-20").unwrap();
+    let rows = fees_in(&conn, "2026-09-20").unwrap();
     assert_eq!(rows.len(), 2, "撤过的留一行痕迹");
     assert!(rows[0].voided, "新的在最前面");
-    assert_eq!(cents_to_yuan(today_total(&conn, "2026-09-20").unwrap()), "200.00");
+    assert_eq!(cents_to_yuan(total_in(&conn, "2026-09-20").unwrap()), "200.00");
 }
 
 #[test]
@@ -203,4 +203,34 @@ fn 打底的桌子费不算老板建过商品() {
     assert!(st.fresh, "空库就是空库，桌子费不算");
     let products = st.steps.iter().find(|s| s.key == "products").unwrap();
     assert!(!products.done, "商品这步还没做");
+}
+
+#[test]
+fn 按月能把整月的桌子费都捞出来() {
+    // 「这个月桌子费收了多少」是老板月底真会问的 —— 一天天翻过去谁都不干
+    let mut conn = open_memory().unwrap();
+    charge(&mut conn, "2026-09-02", "200");
+    charge(&mut conn, "2026-09-20", "600");
+    charge(&mut conn, "2026-08-31", "300"); // 隔壁月，不该混进来
+
+    let 整月 = fees_in(&conn, "2026-09").unwrap();
+    assert_eq!(整月.len(), 2);
+    assert_eq!(
+        整月.iter().map(|f| f.biz_date.as_str()).collect::<Vec<_>>(),
+        vec!["2026-09-20", "2026-09-02"],
+        "按天倒序"
+    );
+    assert_eq!(cents_to_yuan(total_in(&conn, "2026-09").unwrap()), "800.00");
+    assert_eq!(cents_to_yuan(total_in(&conn, "2026-09-20").unwrap()), "600.00", "按天还是那一天");
+}
+
+#[test]
+fn 按月合计不含作废的() {
+    let mut conn = open_memory().unwrap();
+    charge(&mut conn, "2026-09-02", "200");
+    let wrong = charge(&mut conn, "2026-09-20", "600");
+    do_void_sale(&mut conn, wrong).unwrap();
+
+    assert_eq!(fees_in(&conn, "2026-09").unwrap().len(), 2, "撤过的留一行痕迹");
+    assert_eq!(cents_to_yuan(total_in(&conn, "2026-09").unwrap()), "200.00");
 }

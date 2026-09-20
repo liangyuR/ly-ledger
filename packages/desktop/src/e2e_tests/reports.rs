@@ -293,3 +293,145 @@ fn 多行时摘要说清有几样() {
     let list = list_sales(&c.conn, "2026-09-19").unwrap();
     assert!(list[0].summary.contains("等 2 样"), "{}", list[0].summary);
 }
+
+#[test]
+fn 退货单出现在当日流水里且标出来() {
+    // 退货记在退货当天，不是原单那天（docs/05）。它就是那天的一张单据，
+    // 金额为负 —— 列表里不标出来，老板会以为自己那天卖了负数
+    let mut c = counter();
+    let sale = sell(&mut c, "2");
+    do_return(
+        &mut c.conn,
+        sale.sale_id,
+        json!({ "bizDate": "2026-09-20" }),
+    )
+    .unwrap();
+
+    let 原单那天 = list_sales(&c.conn, "2026-09-19").unwrap();
+    assert_eq!(原单那天.len(), 1);
+    assert!(!原单那天[0].is_return, "原单照常留在它那天");
+
+    let 退货那天 = list_sales(&c.conn, "2026-09-20").unwrap();
+    assert_eq!(退货那天.len(), 1);
+    assert!(退货那天[0].is_return);
+    assert!(退货那天[0].total_cents < 0, "退货金额为负");
+}
+
+#[test]
+fn 当天合计把退货冲掉() {
+    // 单据页底下那个合计要跟看板的营业额对得上，否则老板会以为哪边算错了
+    let mut c = counter();
+    let a = sell(&mut c, "1");
+    sell(&mut c, "2");
+    do_return(&mut c.conn, a.sale_id, json!({ "bizDate": "2026-09-19" })).unwrap();
+
+    let list = list_sales(&c.conn, "2026-09-19").unwrap();
+    let sum: i64 = list.iter().map(|s| s.total_cents).sum();
+    assert_eq!(list.len(), 3, "两张销售单加一张退货单");
+    assert_eq!(
+        sum,
+        sum_cents(
+            &c.conn,
+            "SELECT SUM(total_amount_cents) FROM sales
+              WHERE biz_date = '2026-09-19' AND voided_at IS NULL"
+        ),
+        "合计得跟报表口径一致"
+    );
+}
+
+#[test]
+fn 按月看能把整月的单据都捞出来() {
+    let mut c = counter();
+    let zhonghua = c.zhonghua;
+    for day in ["01", "19", "28"] {
+        do_checkout(
+            &mut c.conn,
+            json!({
+                "bizDate": format!("2026-09-{day}"), "settleType": "cash",
+                "items": [{ "productId": zhonghua, "unit": "pack", "qty": "1", "unitPriceYuan": "550" }],
+            }),
+        )
+        .unwrap();
+    }
+    // 隔壁月的不该混进来
+    do_checkout(
+        &mut c.conn,
+        json!({
+            "bizDate": "2026-08-31", "settleType": "cash",
+            "items": [{ "productId": zhonghua, "unit": "pack", "qty": "1", "unitPriceYuan": "550" }],
+        }),
+    )
+    .unwrap();
+
+    let 整月 = list_sales(&c.conn, "2026-09").unwrap();
+    assert_eq!(整月.len(), 3);
+    assert_eq!(
+        整月.iter().map(|s| s.biz_date.as_str()).collect::<Vec<_>>(),
+        vec!["2026-09-28", "2026-09-19", "2026-09-01"],
+        "按天倒序"
+    );
+
+    assert_eq!(list_sales(&c.conn, "2026-09-19").unwrap().len(), 1, "按天看还是只有那天");
+}
+
+#[test]
+fn 补录的单按日期排不按录入顺序排() {
+    // 补录的单 id 最大但日期最早。只按 id 排，它会窜到月初那天的上面
+    let mut c = counter();
+    let zhonghua = c.zhonghua;
+    for day in ["20", "02"] {
+        do_checkout(
+            &mut c.conn,
+            json!({
+                "bizDate": format!("2026-09-{day}"), "settleType": "cash",
+                "items": [{ "productId": zhonghua, "unit": "pack", "qty": "1", "unitPriceYuan": "550" }],
+            }),
+        )
+        .unwrap();
+    }
+
+    let list = list_sales(&c.conn, "2026-09").unwrap();
+    assert_eq!(
+        list.iter().map(|s| s.biz_date.as_str()).collect::<Vec<_>>(),
+        vec!["2026-09-20", "2026-09-02"]
+    );
+}
+
+#[test]
+fn 趋势图以选中的月份为最后一根柱子() {
+    // 报表页翻到 7 月去看，趋势图也得跟着翻过去 —— 不然翻了月份却还盯着
+    // 9 月那根柱子，两边对不上
+    use crate::services::profit_reports::monthly_trend;
+
+    let mut c = counter();
+    let zhonghua = c.zhonghua;
+    for m in ["07", "08", "09"] {
+        do_checkout(
+            &mut c.conn,
+            json!({
+                "bizDate": format!("2026-{m}-10"), "settleType": "cash",
+                "items": [{ "productId": zhonghua, "unit": "pack", "qty": "1", "unitPriceYuan": "550" }],
+            }),
+        )
+        .unwrap();
+    }
+
+    let 到七月 = monthly_trend(&c.conn, 3, Some("2026-07")).unwrap();
+    assert_eq!(
+        到七月.iter().map(|p| p.month.as_str()).collect::<Vec<_>>(),
+        vec!["2026-05", "2026-06", "2026-07"]
+    );
+    assert_eq!(
+        cents_to_yuan(到七月.last().unwrap().revenue_cents),
+        "550.00",
+        "最后那根是 7 月自己的数"
+    );
+    assert!(!到七月.last().unwrap().partial, "7 月已经走完了，不该画成空心");
+
+    let 不传锚点 = monthly_trend(&c.conn, 3, None).unwrap();
+    assert_eq!(
+        不传锚点.last().unwrap().month,
+        crate::services::reports::today(&c.conn).unwrap()[..7],
+        "不传就还是到本月为止"
+    );
+}

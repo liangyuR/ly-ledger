@@ -401,10 +401,170 @@ pub fn export_stale(conn: &Connection, days: i64) -> Result<Export> {
     })
 }
 
+/// 跨月导出：一页按月汇总，一页全部明细。
+///
+/// 一次导一个月的表发给会计够用，但「今年上半年一共做了多少」要自己把六份表
+/// 摞起来加 —— 那正是最容易加错的地方。汇总页把每个月一行摆出来，
+/// 明细页保持跟单月导出**一模一样的列**，会计拿到哪一份都认得。
+pub fn export_sales_range(conn: &Connection, from_month: &str, to_month: &str) -> Result<Export> {
+    crate::validate::check_month(from_month)?;
+    crate::validate::check_month(to_month)?;
+    // 顺手把颠倒的区间摆正：老板从下拉里选月份，先点到哪个都有可能
+    let (from, to) = if from_month <= to_month {
+        (from_month, to_month)
+    } else {
+        (to_month, from_month)
+    };
+
+    let mut summary = Vec::new();
+    {
+        let mut stmt = conn.prepare(
+            "SELECT substr(s.biz_date, 1, 7) AS m,
+                    COUNT(DISTINCT s.id),
+                    SUM(s.total_amount_cents),
+                    SUM(s.cost_amount_cents),
+                    SUM(s.gross_profit_cents)
+               FROM sales s
+              WHERE s.voided_at IS NULL
+                AND substr(s.biz_date, 1, 7) BETWEEN ?1 AND ?2
+              GROUP BY m ORDER BY m",
+        )?;
+        let mapped = stmt.query_map([from, to], |r| {
+            Ok(vec![
+                Cell::Text(r.get::<_, String>(0)?),
+                Cell::Int(r.get(1)?),
+                Cell::Money(r.get(2)?),
+                Cell::Money(r.get(3)?),
+                Cell::Money(r.get(4)?),
+            ])
+        })?;
+        for row in mapped {
+            summary.push(row?);
+        }
+    }
+
+    // 合计行。会计打开第一眼找的就是它，让他自己拉公式不如直接给
+    let total = |col: usize| -> i64 {
+        summary
+            .iter()
+            .map(|r| match r[col] {
+                Cell::Money(v) => v,
+                Cell::Int(v) => v,
+                _ => 0,
+            })
+            .sum()
+    };
+    if !summary.is_empty() {
+        summary.push(vec![
+            Cell::Text("合计".to_string()),
+            Cell::Int(total(1)),
+            Cell::Money(total(2)),
+            Cell::Money(total(3)),
+            Cell::Money(total(4)),
+        ]);
+    }
+
+    let mut detail = Vec::new();
+    {
+        let mut stmt = conn.prepare(
+            "SELECT s.id, s.biz_date, s.settle_type, c.name,
+                    p.name, si.qty_milli, si.unit, si.unit_price_cents,
+                    si.amount_cents, si.cost_amount_cents,
+                    (si.amount_cents - si.cost_amount_cents),
+                    s.discount_amount_cents, s.note
+               FROM sales s
+               JOIN sale_items si ON si.sale_id = s.id
+               JOIN products p ON p.id = si.product_id
+               LEFT JOIN customers c ON c.id = s.customer_id
+              WHERE s.voided_at IS NULL
+                AND substr(s.biz_date, 1, 7) BETWEEN ?1 AND ?2
+              ORDER BY s.biz_date, s.id, si.id",
+        )?;
+        let mapped = stmt.query_map([from, to], |r| {
+            let settle: String = r.get(2)?;
+            let unit: String = r.get(6)?;
+            Ok(vec![
+                Cell::Text(format!("#{}", r.get::<_, i64>(0)?)),
+                Cell::Text(r.get::<_, String>(1)?),
+                Cell::Text(if settle == "cash" { "现金" } else { "挂账" }.to_string()),
+                text(r.get(3)?),
+                Cell::Text(r.get::<_, String>(4)?),
+                Cell::Text(milli_to_qty(r.get::<_, i64>(5)?)),
+                Cell::Text(if unit == "pack" { "整包" } else { "单件" }.to_string()),
+                Cell::Money(r.get(7)?),
+                Cell::Money(r.get(8)?),
+                Cell::Money(r.get(9)?),
+                Cell::Money(r.get(10)?),
+                Cell::Money(r.get(11)?),
+                Cell::Text(r.get::<_, String>(12)?),
+            ])
+        })?;
+        for row in mapped {
+            detail.push(row?);
+        }
+    }
+
+    let bytes = write_book(&[
+        SheetSpec {
+            name: "按月汇总",
+            headers: &[
+                ("月份", 12.0),
+                ("单数", 10.0),
+                ("营业额", 16.0),
+                ("成本", 16.0),
+                ("毛利", 16.0),
+            ],
+            rows: &summary,
+        },
+        SheetSpec {
+            name: "全部明细",
+            headers: &[
+                ("单号", 10.0),
+                ("日期", 12.0),
+                ("结算", 8.0),
+                ("客户", 12.0),
+                ("商品", 22.0),
+                ("数量", 10.0),
+                ("单位", 8.0),
+                ("单价", 14.0),
+                ("金额", 14.0),
+                ("成本", 14.0),
+                ("毛利", 14.0),
+                ("整单抹零", 14.0),
+                ("备注", 20.0),
+            ],
+            rows: &detail,
+        },
+    ])?;
+
+    Ok(Export {
+        filename: format!("销售明细-{from}至{to}.xlsx"),
+        bytes,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::db::open_memory;
+
+    #[test]
+    fn 跨月导出把区间颠倒过来也认() {
+        // 从下拉里选月份，先点到哪个都有可能。报「起始月不能晚于结束月」
+        // 只是把一个软件自己能解决的问题丢回给老板
+        let conn = open_memory().unwrap();
+        let a = export_sales_range(&conn, "2026-09", "2026-07").unwrap();
+        assert_eq!(a.filename, "销售明细-2026-07至2026-09.xlsx");
+        assert_eq!(&a.bytes[..2], b"PK");
+    }
+
+    #[test]
+    fn 跨月导出只认月份不认日期() {
+        // 传进来一个 2026-09-20 会让 BETWEEN 比错 —— 提前挡住
+        let conn = open_memory().unwrap();
+        assert!(export_sales_range(&conn, "2026-09-20", "2026-09").is_err());
+        assert!(export_sales_range(&conn, "2026-09", "2026").is_err());
+    }
 
     #[test]
     fn 空库也导得出一份只有表头的表() {

@@ -86,7 +86,8 @@ function route(method: Method, path: string, body?: unknown): [string, Args] {
 
     case 'sales':
       if (method === 'POST' && second === 'checkout') return ['sales_checkout', { input: b }];
-      if (method === 'GET' && !second) return ['sales_by_date', { date: query.get('date') ?? undefined }];
+      if (method === 'GET' && !second)
+        return ['sales_by_date', { period: query.get('period') ?? undefined }];
       if (method === 'GET') return ['sale_detail', { id }];
       if (method === 'POST' && third === 'void') return ['sale_void', { id }];
       if (method === 'POST' && third === 'revise') return ['sale_revise', { id, input: b }];
@@ -113,12 +114,13 @@ function route(method: Method, path: string, body?: unknown): [string, Args] {
       if (method === 'GET') return ['expenses_month', { month: query.get('month') ?? undefined }];
       if (method === 'POST' && !second) return ['expense_add', { input: b }];
       if (method === 'POST' && third === 'void') return ['expense_void', { id }];
+      if (method === 'PATCH') return ['expense_update', { id, ...b }];
       break;
 
     case 'services':
       if (method === 'GET' && !second) return ['service_fees_list', {}];
       if (method === 'GET' && second === 'day')
-        return ['service_fees_day', { date: query.get('date') ?? undefined }];
+        return ['service_fees_day', { period: query.get('period') ?? undefined }];
       break;
 
     case 'reports':
@@ -168,7 +170,7 @@ export const api = {
 // 「下载」文件夹。现在弹系统的保存对话框，老板自己选存哪儿 ——
 // 一份要发给会计的表，存完找不着才是真问题。
 
-export type ExportKind = 'sales' | 'ranking' | 'stale' | 'debts' | 'products';
+export type ExportKind = 'sales' | 'sales_range' | 'ranking' | 'stale' | 'debts' | 'products';
 
 export interface ExportResult {
   /** false = 老板点了取消。这不是错误，别弹红框 */

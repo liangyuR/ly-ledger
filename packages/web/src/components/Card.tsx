@@ -38,10 +38,12 @@ export function Figure({
 }) {
   const color = tone === 'brand' ? 'text-brand-900' : tone === 'danger' ? 'text-danger' : 'text-ink';
   return (
-    <Card className="grow">
-      <div className="mb-3 text-[18px] text-ink-2">{label}</div>
-      <div className={`num text-[52px] leading-none font-semibold ${color}`}>{value}</div>
-      {sub && <div className="mt-2.5 text-[16px] text-muted">{sub}</div>}
+    // 数字压到 34px：52px 的四个大数字在报表页占掉小半屏，
+    // 而它们只是「顺带看一眼」，下面的图和表才是要看的东西
+    <Card className="grow px-6 py-4">
+      <div className="mb-1.5 text-[16px] text-ink-2">{label}</div>
+      <div className={`num text-[34px] leading-none font-semibold ${color}`}>{value}</div>
+      {sub && <div className="mt-1.5 text-[15px] text-muted">{sub}</div>}
     </Card>
   );
 }

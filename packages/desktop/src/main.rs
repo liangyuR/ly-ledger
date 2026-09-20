@@ -87,6 +87,7 @@ fn main() {
             // 杂项开支
             commands::expense_add,
             commands::expense_void,
+            commands::expense_update,
             commands::expenses_month,
             // 看板与利润报表
             commands::reports_dashboard,
@@ -103,6 +104,7 @@ fn main() {
             commands::backup_to_usb,
             // Excel 导出
             commands::export_sales,
+            commands::export_sales_range,
             commands::export_ranking,
             commands::export_stale,
             commands::export_debts,

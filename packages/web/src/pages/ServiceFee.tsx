@@ -17,6 +17,8 @@ interface ServiceItem {
 
 interface FeeRow {
   saleId: number;
+  /** 按月看时一行行跨天，光有时分认不出是哪天 */
+  bizDate: string;
   time: string;
   name: string;
   amount: string;
@@ -26,7 +28,9 @@ interface FeeRow {
 }
 
 interface DayFees {
-  date: string;
+  /** 看的是哪一天或哪个月 */
+  period: string;
+  count: number;
   total: string;
   items: FeeRow[];
 }
@@ -40,6 +44,20 @@ function today() {
   return new Date().toLocaleDateString('sv-SE');
 }
 
+/** 日期加减。中午构造，避开夏令时把日子推过界 */
+function shiftDay(iso: string, by: number) {
+  const d = new Date(`${iso}T12:00:00`);
+  d.setDate(d.getDate() + by);
+  return d.toLocaleDateString('sv-SE');
+}
+
+/** 月份加减。不拿 Date 做月运算 —— 1 月减一个月要翻年 */
+function shiftMonth(m: string, by: number) {
+  const [y, mo] = m.split('-').map(Number);
+  const total = y * 12 + (mo - 1) + by;
+  return `${Math.floor(total / 12)}-${String((total % 12) + 1).padStart(2, '0')}`;
+}
+
 /** "200.00" → "200"，"43.50" 原样留着 —— 按钮上不摆没用的两个零 */
 function trimZeros(yuan: string) {
   return yuan.endsWith('.00') ? yuan.slice(0, -3) : yuan;
@@ -47,7 +65,11 @@ function trimZeros(yuan: string) {
 
 export default function ServiceFee() {
   const qc = useQueryClient();
+  // 看哪一段（一天 2026-09-20 或一个月 2026-09）和记在哪天是两件事：
+  // 翻上个月的账时，新收的这笔还是该记在今天
+  const [period, setPeriod] = useState<string>(today);
   const [bizDate, setBizDate] = useState(today);
+  const month = period.length === 7;
   const [picked, setPicked] = useState<number | null>(null);
   const [amount, setAmount] = useState('');
   const [settle, setSettle] = useState<'cash' | 'credit'>('cash');
@@ -61,8 +83,8 @@ export default function ServiceFee() {
     queryFn: () => api.get<{ items: ServiceItem[] }>('/api/services'),
   });
   const day = useQuery({
-    queryKey: ['serviceFeeDay', bizDate],
-    queryFn: () => api.get<DayFees>(`/api/services/day?date=${bizDate}`),
+    queryKey: ['serviceFeeDay', period],
+    queryFn: () => api.get<DayFees>(`/api/services/day?period=${period}`),
   });
   // 挂账才需要认人。现金单不挂客户 —— 后端也会拒绝
   const customers = useQuery({
@@ -145,23 +167,12 @@ export default function ServiceFee() {
         <span className="text-[17px] text-ink-2">
           跟卖货一样算进营业额，只是没有进价 —— 收多少赚多少
         </span>
-        <span className="grow" />
-        <label className="flex items-center gap-2.5 text-[17px] text-ink-2">
-          日期
-          <input
-            type="date"
-            value={bizDate}
-            onChange={(e) => setBizDate(e.target.value)}
-            aria-label="日期"
-            className="num h-12 w-[200px] rounded-[10px] border border-line bg-card px-4 text-[19px]"
-          />
-        </label>
       </div>
 
       <div className="flex min-h-0 grow gap-5">
         <Card className="flex grow-[1.45] flex-col overflow-hidden">
           <div className="mb-4 flex shrink-0 items-baseline">
-            <span className="mr-3.5 text-[18px] text-ink-2">这天收了</span>
+            <span className="mr-3.5 text-[18px] text-ink-2">{month ? '这个月收了' : '这天收了'}</span>
             <span className="num text-[42px] leading-none font-semibold">
               ¥{day.data?.total ?? '0.00'}
             </span>
@@ -171,8 +182,73 @@ export default function ServiceFee() {
             </span>
           </div>
 
+          {/* 按天是「今天收了多少」，按月是「这个月桌子费收了多少」—— 月底真会问 */}
+          <div className="mb-4 flex shrink-0 items-center gap-2.5">
+            <div className="mr-1.5 flex gap-1.5">
+              {(['按天', '按月'] as const).map((label) => (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={() =>
+                    setPeriod(
+                      label === '按月'
+                        ? period.slice(0, 7)
+                        : period === today().slice(0, 7)
+                          ? today()
+                          : `${period}-01`,
+                    )
+                  }
+                  className={`h-11 rounded-[10px] border px-4 text-[16px] ${
+                    (label === '按月') === month
+                      ? 'border-brand-700 bg-brand-50 font-semibold text-brand-900'
+                      : 'border-line text-ink-2'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={() => setPeriod(month ? shiftMonth(period, -1) : shiftDay(period, -1))}
+              aria-label={month ? '上个月' : '前一天'}
+              className="h-11 w-11 rounded-[10px] border border-line bg-card text-[17px]"
+            >
+              ‹
+            </button>
+            {month ? (
+              <span className="num w-[170px] text-center text-[19px]">{period}</span>
+            ) : (
+              <input
+                type="date"
+                value={period}
+                onChange={(e) => e.target.value && setPeriod(e.target.value)}
+                aria-label="看哪一天"
+                className="num h-11 w-[170px] rounded-[10px] border border-line bg-card px-3 text-[17px]"
+              />
+            )}
+            <button
+              type="button"
+              onClick={() => setPeriod(month ? shiftMonth(period, 1) : shiftDay(period, 1))}
+              disabled={month ? period >= today().slice(0, 7) : period >= today()}
+              aria-label={month ? '下个月' : '后一天'}
+              className="h-11 w-11 rounded-[10px] border border-line bg-card text-[17px] disabled:opacity-40"
+            >
+              ›
+            </button>
+            {period !== today() && period !== today().slice(0, 7) && (
+              <button
+                type="button"
+                onClick={() => setPeriod(month ? today().slice(0, 7) : today())}
+                className="h-11 rounded-[10px] px-3 text-[15px] text-muted underline decoration-dotted underline-offset-4 hover:text-brand-900"
+              >
+                {month ? '回到本月' : '回到今天'}
+              </button>
+            )}
+          </div>
+
           <div className="flex h-12 shrink-0 items-center gap-4 border-t border-line text-[17px] text-ink-2">
-            <span className="w-20">时间</span>
+            <span className="w-20">{month ? '日期' : '时间'}</span>
             <span className="w-32">项目</span>
             <span className="w-32 text-right">金额</span>
             <span className="grow pl-4">怎么结的</span>
@@ -180,7 +256,11 @@ export default function ServiceFee() {
           </div>
 
           <div className="min-h-0 grow overflow-auto">
-            {rows.length === 0 && <div className="pt-4 text-[17px] text-muted">这天还没收过</div>}
+            {rows.length === 0 && (
+              <div className="pt-4 text-[17px] text-muted">
+                {month ? '这个月还没收过' : '这天还没收过'}
+              </div>
+            )}
             {rows.map((r) => (
               <div
                 key={r.saleId}
@@ -188,7 +268,9 @@ export default function ServiceFee() {
                   r.voided ? 'opacity-55' : ''
                 }`}
               >
-                <span className="num w-20 text-[17px] text-ink-2">{r.time}</span>
+                <span className="num w-20 text-[17px] text-ink-2">
+                  {month ? r.bizDate.slice(5) : r.time}
+                </span>
                 <span className="w-32 truncate text-[19px]">{r.name}</span>
                 <span
                   className={`num w-32 text-right text-[24px] font-medium ${
@@ -338,6 +420,34 @@ export default function ServiceFee() {
               </div>
             )}
           </div>
+
+          {/* 日期贴着「收下」放：它管的是这一笔记在哪天，跟左边看哪一段没关系 */}
+          <div className="mt-5 flex shrink-0 items-center gap-3.5">
+            <label htmlFor="feeDate" className="grow text-[17px] text-ink-2">
+              记在哪天
+            </label>
+            <input
+              id="feeDate"
+              type="date"
+              value={bizDate}
+              onChange={(e) => setBizDate(e.target.value)}
+              className={`num h-12 w-[180px] rounded-[10px] border bg-card px-3 text-[19px] ${
+                bizDate === today() ? 'border-line' : 'border-brand-700 bg-brand-50'
+              }`}
+            />
+          </div>
+          {bizDate !== today() && (
+            <div className="mt-2 flex shrink-0 items-center gap-2.5 text-[16px] text-brand-900">
+              这笔记在 <span className="num">{bizDate}</span>，不是今天
+              <button
+                type="button"
+                onClick={() => setBizDate(today())}
+                className="rounded-[8px] px-2 py-0.5 text-[15px] text-muted underline decoration-dotted underline-offset-4 hover:text-brand-900"
+              >
+                改回今天
+              </button>
+            </div>
+          )}
 
           <Flash value={flash} className="mt-4 shrink-0" />
 

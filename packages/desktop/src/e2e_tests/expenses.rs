@@ -185,3 +185,60 @@ fn 一分钱没花也给得出一张空表() {
     assert_eq!(m.total_cents, 0);
     assert!(m.items.is_empty() && m.by_category.is_empty());
 }
+
+// ═══════════════════ 改名目和备注 ═══════════════════
+//
+// 名目和备注不参与任何计算 —— 名目只是归类，备注只给人看。
+// 写错了当场改回来，不值得走「作废 + 重记」（金额和日期错了才走那条）。
+
+use crate::services::expenses::update;
+
+fn do_update(conn: &mut Connection, id: i64, cat: Option<&str>, note: Option<&str>) -> Result<()> {
+    tx(conn, |c| update(c, id, cat, note))
+}
+
+#[test]
+fn 改名目之后按名目小计跟着变() {
+    let mut conn = open_memory().unwrap();
+    let id = spend(&mut conn, "03", "其他", "6000");
+
+    do_update(&mut conn, id, Some("烟钱"), None).unwrap();
+
+    let m = sep(&conn);
+    assert_eq!(m.by_category.len(), 1);
+    assert_eq!(m.by_category[0].category, "烟钱");
+    assert_eq!(cents_to_yuan(m.total_cents), "6000.00", "金额不该跟着动");
+}
+
+#[test]
+fn 只改备注时名目保持不变() {
+    let mut conn = open_memory().unwrap();
+    let id = spend(&mut conn, "03", "伙食", "216");
+
+    do_update(&mut conn, id, None, Some("买菜")).unwrap();
+
+    let m = sep(&conn);
+    assert_eq!(m.items[0].category, "伙食");
+    assert_eq!(m.items[0].note, "买菜");
+}
+
+#[test]
+fn 名目不能改成空的() {
+    // 空了这笔钱就归不了类，小计表上会多出一个没名字的格子
+    let mut conn = open_memory().unwrap();
+    let id = spend(&mut conn, "03", "伙食", "216");
+
+    let err = err_of(do_update(&mut conn, id, Some("   "), None));
+    assert!(err.contains("名目"), "{err}");
+    assert_eq!(sep(&conn).items[0].category, "伙食", "拒了就一个字都别动");
+}
+
+#[test]
+fn 作废过的开支改不动() {
+    let mut conn = open_memory().unwrap();
+    let id = spend(&mut conn, "03", "伙食", "216");
+    do_void(&mut conn, id).unwrap();
+
+    let err = err_of(do_update(&mut conn, id, Some("运费"), None));
+    assert!(err.contains("作废"), "{err}");
+}

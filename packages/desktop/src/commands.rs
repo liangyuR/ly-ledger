@@ -608,27 +608,41 @@ fn slice_chars(s: &str, skip: usize, take: usize) -> String {
 }
 
 #[tauri::command]
-pub fn sales_by_date(state: State<'_, AppState>, date: Option<String>) -> Result<Value> {
+pub fn sales_by_date(state: State<'_, AppState>, period: Option<String>) -> Result<Value> {
     state.with(|conn| {
-        let date = match &date {
-            Some(d) => d.clone(),
+        // 某一天 2026-09-20，或者某个月 2026-09。不传就是今天
+        let period = match &period {
+            Some(p) => {
+                crate::validate::check_day_or_month(p)?;
+                p.clone()
+            }
             None => reports::today(conn)?,
         };
-        let items: Vec<Value> = sale_detail::list_sales(conn, &date)?
-            .into_iter()
+        let rows = sale_detail::list_sales(conn, &period)?;
+        // 合计在这儿加，前端不做金额运算 —— 退货单金额为负，天然就冲减掉了
+        let total_cents: i64 = rows.iter().map(|s| s.total_cents).sum();
+        let items: Vec<Value> = rows
+            .iter()
             .map(|s| {
                 json!({
                     "id": s.id,
+                    "bizDate": s.biz_date,
                     "time": s.time,
                     "summary": s.summary,
                     "totalCents": s.total_cents,
                     "settleType": s.settle_type,
                     "customerName": s.customer_name,
+                    "isReturn": s.is_return,
                     "total": cents_to_yuan(s.total_cents),
                 })
             })
             .collect();
-        Ok(json!({ "date": date, "items": items }))
+        Ok(json!({
+            "period": period,
+            "count": items.len(),
+            "total": cents_to_yuan(total_cents),
+            "items": items,
+        }))
     })
 }
 
@@ -677,19 +691,23 @@ pub fn service_fees_list(state: State<'_, AppState>) -> Result<Value> {
     })
 }
 
-/// 某天收了哪几笔。不传日期就是今天。
+/// 某天或某个月收了哪几笔。不传就是今天。
 #[tauri::command]
-pub fn service_fees_day(state: State<'_, AppState>, date: Option<String>) -> Result<Value> {
+pub fn service_fees_day(state: State<'_, AppState>, period: Option<String>) -> Result<Value> {
     state.with(|conn| {
-        let day = match date {
-            Some(d) => d,
+        let day = match period {
+            Some(p) => {
+                crate::validate::check_day_or_month(&p)?;
+                p
+            }
             None => reports::today(conn)?,
         };
-        let items: Vec<Value> = service_fees::today_fees(conn, &day)?
+        let items: Vec<Value> = service_fees::fees_in(conn, &day)?
             .into_iter()
             .map(|f| {
                 json!({
                     "saleId": f.sale_id,
+                    "bizDate": f.biz_date,
                     "time": f.time,
                     "name": f.name,
                     "amount": cents_to_yuan(f.amount_cents),
@@ -700,8 +718,9 @@ pub fn service_fees_day(state: State<'_, AppState>, date: Option<String>) -> Res
             })
             .collect();
         Ok(json!({
-            "date": day.clone(),
-            "total": cents_to_yuan(service_fees::today_total(conn, &day)?),
+            "period": day.clone(),
+            "count": items.len(),
+            "total": cents_to_yuan(service_fees::total_in(conn, &day)?),
             "items": items,
         }))
     })
@@ -1021,6 +1040,20 @@ pub fn expense_void(state: State<'_, AppState>, id: i64) -> Result<Value> {
     })
 }
 
+/// 改一笔开支的名目或备注。金额和日期改不了 —— 那两样走作废重记。
+#[tauri::command]
+pub fn expense_update(
+    state: State<'_, AppState>,
+    id: i64,
+    category: Option<String>,
+    note: Option<String>,
+) -> Result<Value> {
+    state.tx(|conn| {
+        expenses::update(conn, id, category.as_deref(), note.as_deref())?;
+        Ok(json!({ "expenseId": id }))
+    })
+}
+
 /// 某个月的开支：合计、按名目小计、逐笔明细。不传月份就是本月。
 #[tauri::command]
 pub fn expenses_month(state: State<'_, AppState>, month: Option<String>) -> Result<Value> {
@@ -1087,7 +1120,8 @@ pub fn reports_profit(state: State<'_, AppState>, month: Option<String>) -> Resu
                 Some(m) => m.to_string(),
                 None => reports::today(conn)?[..7].to_string(),
             },
-            "monthly": profit_reports::monthly_trend(conn, 6)?.iter().map(|m| json!({
+            // 趋势图以选中的那个月为最后一根柱子，翻月份时图跟着翻
+            "monthly": profit_reports::monthly_trend(conn, 6, m)?.iter().map(|m| json!({
                 "month": m.month,
                 "revenue": cents_to_yuan(m.revenue_cents),
                 "profit": cents_to_yuan(m.profit_cents),
@@ -1302,6 +1336,18 @@ pub async fn export_sales(
     month: Option<String>,
 ) -> Result<Value> {
     let export = state.with(|conn| excel::export_sales(conn, month.as_deref()))?;
+    save_export(&app, export)
+}
+
+/// 跨月导出：一份文件，一页按月汇总 + 一页全部明细。
+#[tauri::command]
+pub async fn export_sales_range(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    from_month: String,
+    to_month: String,
+) -> Result<Value> {
+    let export = state.with(|conn| excel::export_sales_range(conn, &from_month, &to_month))?;
     save_export(&app, export)
 }
 

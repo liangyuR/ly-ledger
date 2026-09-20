@@ -87,6 +87,33 @@ pub fn void(conn: &Connection, id: i64) -> Result<()> {
     Ok(())
 }
 
+/// 改名目或备注。
+///
+/// 这两样不参与任何计算 —— 名目只是归类，备注只给人看。改错了当场改回来，
+/// 不值得走「作废 + 重记」那一套（金额和日期错了才走那条路：
+/// 那两样一改就动合计和归月，得留痕迹）。
+pub fn update(conn: &Connection, id: i64, category: Option<&str>, note: Option<&str>) -> Result<()> {
+    let voided: Option<Option<String>> = conn
+        .query_row("SELECT voided_at FROM expenses WHERE id = ?1", [id], |r| r.get(0))
+        .optional()?;
+
+    match voided {
+        None => bail!("没有这笔开支：{id}"),
+        Some(Some(_)) => bail!("这笔已经作废了，改不动"),
+        Some(None) => {}
+    }
+
+    if let Some(c) = category {
+        let c = c.trim();
+        ensure!(!c.is_empty(), "名目不能空着 —— 空了这笔钱就归不了类");
+        conn.execute("UPDATE expenses SET category = ?1 WHERE id = ?2", params![c, id])?;
+    }
+    if let Some(n) = note {
+        conn.execute("UPDATE expenses SET note = ?1 WHERE id = ?2", params![n.trim(), id])?;
+    }
+    Ok(())
+}
+
 /// 某个月的全部开支。`month` 形如 2026-09。
 pub fn month(conn: &Connection, month: &str) -> Result<MonthExpenses> {
     let items: Vec<ExpenseRow> = {

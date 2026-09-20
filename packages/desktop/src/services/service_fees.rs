@@ -57,7 +57,7 @@ pub fn list(conn: &Connection) -> Result<Vec<ServiceItem>> {
     let mut out = Vec::with_capacity(raw.len());
     for (id, name, unit) in raw {
         out.push(ServiceItem {
-            common_amounts_cents: common_amounts(&conn, id)?,
+            common_amounts_cents: common_amounts(conn, id)?,
             id,
             name,
             unit,
@@ -69,6 +69,8 @@ pub fn list(conn: &Connection) -> Result<Vec<ServiceItem>> {
 /// 今天收了哪几笔。作废过的也列出来，标一下 —— 撤完就消失会让人以为撤错了别的。
 pub struct FeeRow {
     pub sale_id: i64,
+    /// 业务日期。按月看时一行行跨天，光有时分认不出是哪天
+    pub biz_date: String,
     pub time: String,
     pub name: String,
     pub amount_cents: i64,
@@ -77,40 +79,45 @@ pub struct FeeRow {
     pub voided: bool,
 }
 
-pub fn today_fees(conn: &Connection, biz_date: &str) -> Result<Vec<FeeRow>> {
+/// `period` 是某一天 `2026-09-20` 或某个月 `2026-09`。
+/// 两种都是 biz_date 的前缀，一条 LIKE 通吃（调用方先用
+/// `validate::check_day_or_month` 确认它真是个前缀）。
+pub fn fees_in(conn: &Connection, period: &str) -> Result<Vec<FeeRow>> {
     let mut stmt = conn.prepare(
-        "SELECT s.id, s.created_at, p.name, si.amount_cents, s.settle_type, c.name,
+        "SELECT s.id, s.biz_date, s.created_at, p.name, si.amount_cents, s.settle_type, c.name,
                 s.voided_at IS NOT NULL
            FROM sales s
            JOIN sale_items si ON si.sale_id = s.id
            JOIN products p    ON p.id = si.product_id
            LEFT JOIN customers c ON c.id = s.customer_id
-          WHERE p.is_service = 1 AND s.biz_date = ?1
-          ORDER BY s.id DESC",
+          WHERE p.is_service = 1 AND s.biz_date LIKE ?1 || '%'
+          -- 按月看得先按天排。补录的单 id 靠后但日期靠前，只按 id 排会串位
+          ORDER BY s.biz_date DESC, s.id DESC",
     )?;
-    let rows = stmt.query_map([biz_date], |r| {
+    let rows = stmt.query_map([period], |r| {
         Ok(FeeRow {
             sale_id: r.get(0)?,
-            time: r.get::<_, String>(1)?.chars().skip(11).take(5).collect(),
-            name: r.get(2)?,
-            amount_cents: r.get(3)?,
-            settle_type: r.get(4)?,
-            customer_name: r.get(5)?,
-            voided: r.get(6)?,
+            biz_date: r.get(1)?,
+            time: r.get::<_, String>(2)?.chars().skip(11).take(5).collect(),
+            name: r.get(3)?,
+            amount_cents: r.get(4)?,
+            settle_type: r.get(5)?,
+            customer_name: r.get(6)?,
+            voided: r.get(7)?,
         })
     })?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
-/// 今天一共收了多少（不含作废的）。
-pub fn today_total(conn: &Connection, biz_date: &str) -> Result<i64> {
+/// 这一天（或这个月）一共收了多少，不含作废的。
+pub fn total_in(conn: &Connection, period: &str) -> Result<i64> {
     let v: Option<i64> = conn.query_row(
         "SELECT SUM(si.amount_cents)
            FROM sales s
            JOIN sale_items si ON si.sale_id = s.id
            JOIN products p    ON p.id = si.product_id
-          WHERE p.is_service = 1 AND s.biz_date = ?1 AND s.voided_at IS NULL",
-        [biz_date],
+          WHERE p.is_service = 1 AND s.biz_date LIKE ?1 || '%' AND s.voided_at IS NULL",
+        [period],
         |r| r.get(0),
     )?;
     Ok(v.unwrap_or(0))

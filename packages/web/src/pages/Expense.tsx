@@ -80,6 +80,21 @@ export default function Expense() {
     onError: (e) => setFlash({ tone: 'bad', text: (e as Error).message }),
   });
 
+  // 名目和备注不参与任何计算，改错了当场改回来就行 ——
+  // 金额和日期错了才走「作废 + 重记」，那两样一改就动合计和归月
+  const edit = useMutation({
+    mutationFn: (v: { id: number; category?: string; note?: string }) =>
+      api.patch<{ expenseId: number }>(`/api/expenses/${v.id}`, {
+        category: v.category,
+        note: v.note,
+      }),
+    onSuccess: () => refresh(),
+    onError: (e) => {
+      setFlash({ tone: 'bad', text: (e as Error).message });
+      refresh(); // 拒了就把界面上那个值退回库里的
+    },
+  });
+
   const voidOne = useMutation({
     mutationFn: (id: number) => api.post<{ expenseId: number }>(`/api/expenses/${id}/void`, {}),
     onSuccess: () => {
@@ -159,9 +174,9 @@ export default function Expense() {
 
           <div className="flex h-12 shrink-0 items-center gap-4 border-t border-line text-[17px] text-ink-2">
             <span className="w-28">日期</span>
-            <span className="w-32">名目</span>
+            <span className="w-32 pl-2">名目</span>
             <span className="w-32 text-right">金额</span>
-            <span className="grow pl-4">备注</span>
+            <span className="grow pl-2">备注　<span className="text-muted">这两格点一下就能改</span></span>
             <span className="w-16" />
           </div>
 
@@ -170,11 +185,49 @@ export default function Expense() {
               <div className="pt-4 text-[17px] text-muted">这个月还没记过开支</div>
             )}
             {items.map((e) => (
-              <div key={e.id} className="flex h-16 items-center gap-4 border-t border-line">
+              // key 带上值：改完刷新后 defaultValue 才会跟着更新
+              <div
+                key={`${e.id}-${e.category}-${e.note}`}
+                className="flex h-16 items-center gap-4 border-t border-line"
+              >
                 <span className="num w-28 text-[17px] text-ink-2">{e.bizDate}</span>
-                <span className="w-32 truncate text-[19px]">{e.category}</span>
+                {/* 名目和备注点一下就能改。金额是只读的 —— 它一改就动合计，
+                    得留一条作废痕迹，不能悄悄改掉 */}
+                <input
+                  defaultValue={e.category}
+                  onBlur={(ev) => {
+                    const v = ev.target.value.trim();
+                    if (v && v !== e.category) edit.mutate({ id: e.id, category: v });
+                    else ev.target.value = e.category;
+                  }}
+                  onKeyDown={(ev) => {
+                    if (ev.key === 'Enter') ev.currentTarget.blur();
+                    if (ev.key === 'Escape') {
+                      ev.currentTarget.value = e.category;
+                      ev.currentTarget.blur();
+                    }
+                  }}
+                  aria-label={`${e.bizDate} 这笔的名目`}
+                  className="w-32 rounded-[8px] border border-transparent bg-transparent px-2 py-1 text-[19px] hover:border-line focus:border-brand-700 focus:bg-card"
+                />
                 <span className="num w-32 text-right text-[24px] font-medium">¥{e.amount}</span>
-                <span className="grow truncate pl-4 text-[16px] text-ink-2">{e.note}</span>
+                <input
+                  defaultValue={e.note}
+                  onBlur={(ev) => {
+                    const v = ev.target.value.trim();
+                    if (v !== e.note) edit.mutate({ id: e.id, note: v });
+                  }}
+                  onKeyDown={(ev) => {
+                    if (ev.key === 'Enter') ev.currentTarget.blur();
+                    if (ev.key === 'Escape') {
+                      ev.currentTarget.value = e.note;
+                      ev.currentTarget.blur();
+                    }
+                  }}
+                  placeholder="写点什么"
+                  aria-label={`${e.bizDate} 这笔的备注`}
+                  className="grow rounded-[8px] border border-transparent bg-transparent px-2 py-1 text-[16px] text-ink-2 hover:border-line focus:border-brand-700 focus:bg-card"
+                />
                 <button
                   type="button"
                   onClick={() => voidOne.mutate(e.id)}
@@ -187,9 +240,6 @@ export default function Expense() {
             ))}
           </div>
 
-          <div className="mt-4 shrink-0 border-t border-line pt-4 text-[16px] text-muted">
-            作废的那笔不从库里删掉，只是不再算进合计 —— 钱的记录留一条痕迹，比凭空消失安全
-          </div>
         </Card>
 
         <Card title="记一笔" className="flex min-w-0 grow flex-col overflow-hidden">

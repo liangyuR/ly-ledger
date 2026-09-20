@@ -21,9 +21,15 @@ pub struct MonthPoint {
 }
 
 /// 近 N 个月的毛利趋势。
-pub fn monthly_trend(conn: &Connection, months: i64) -> Result<Vec<MonthPoint>> {
+/// 最近几个月的毛利趋势，**以 `anchor` 那个月为最后一根柱子**。
+///
+/// 不写死「到本月为止」：报表页能翻到 7 月去看，趋势图也得跟着翻过去，
+/// 不然翻了月份却还盯着 9 月那根柱子，两边对不上。
+pub fn monthly_trend(conn: &Connection, months: i64, anchor: Option<&str>) -> Result<Vec<MonthPoint>> {
     let day = today(conn)?;
     let this_month = day[..7].to_string();
+    // 柱子排到哪个月为止。只有真正的「本月」才画成空心（它还没走完）
+    let last_month = anchor.unwrap_or(&this_month).to_string();
 
     let rows: HashMap<String, (i64, i64)> = {
         let mut stmt = conn.prepare(
@@ -32,19 +38,20 @@ pub fn monthly_trend(conn: &Connection, months: i64) -> Result<Vec<MonthPoint>> 
                     SUM(gross_profit_cents)
                FROM sales
               WHERE voided_at IS NULL
-                AND biz_date >= date(?1, 'start of month', ?2)
+                AND biz_date >= date(?1 || '-01', 'start of month', ?2)
+                AND substr(biz_date, 1, 7) <= ?1
               GROUP BY month
               ORDER BY month",
         )?;
-        let rows = stmt.query_map(params![day, format!("-{} month", months - 1)], |r| {
+        let rows = stmt.query_map(params![last_month, format!("-{} month", months - 1)], |r| {
             Ok((r.get::<_, String>(0)?, (r.get(1)?, r.get(2)?)))
         })?;
         rows.collect::<rusqlite::Result<_>>()?
     };
 
     // 没有销售的月份也要出现，否则趋势图会出现「跳月」，看起来像少了一截
-    let y: i32 = this_month[..4].parse().unwrap_or(1970);
-    let m: i32 = this_month[5..7].parse().unwrap_or(1);
+    let y: i32 = last_month[..4].parse().unwrap_or(1970);
+    let m: i32 = last_month[5..7].parse().unwrap_or(1);
 
     let mut out = Vec::with_capacity(months as usize);
     for i in (0..months).rev() {

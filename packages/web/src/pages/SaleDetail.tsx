@@ -5,6 +5,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { api, endpoints, type Product } from '../api/client';
 import { Card } from '../components/Card';
 import { Flash } from '../components/Flash';
+import { Modal } from '../components/Modal';
 import { useHotkeys } from '../hooks/useHotkeys';
 import { formatYuan, lineAmountCents, yuanToCents } from '../money';
 
@@ -199,7 +200,12 @@ export default function SaleDetail() {
   });
 
   useHotkeys({
-    Escape: () => (mode === 'view' ? navigate(-1) : setMode('view')),
+    // 开着改日期框时，Esc 该先关框 —— 不然一按就退回上一页，白填了
+    Escape: () => {
+      if (redating) setRedating(false);
+      else if (mode !== 'view') setMode('view');
+      else navigate(-1);
+    },
   });
 
   if (detail.isError) {
@@ -218,52 +224,11 @@ export default function SaleDetail() {
           ←
         </button>
         <h1 className="m-0 text-2xl font-semibold">单据详情</h1>
+        {/* 这一行是单据的身份，不是控件 —— 改日期在下面的操作区，
+            混在这儿又小又灰，看漏和误点各占一半 */}
         <span className="num text-[17px] text-ink-2">
-          #{d.id}
-          {/* 补录是常态：昨天的生意今天才录，日期得能改回去（红线 2）。
-              作废的单不给改 —— 后端也会拒 */}
-          {d.voidedAt ? (
-            d.bizDate
-          ) : redating ? (
-            <>
-              <input
-                type="date"
-                autoFocus
-                value={newDate}
-                onChange={(e) => setNewDate(e.target.value)}
-                aria-label="业务日期"
-                className="num h-10 w-[170px] rounded-[10px] border border-line bg-card px-2.5 text-[17px]"
-              />
-              <button
-                type="button"
-                onClick={() => setDate.mutate(newDate)}
-                disabled={setDate.isPending || newDate === d.bizDate}
-                className="ml-2 h-10 rounded-[10px] bg-brand-700 px-3.5 text-[16px] font-semibold text-white disabled:opacity-40"
-              >
-                改到这天
-              </button>
-              <button
-                type="button"
-                onClick={() => setRedating(false)}
-                className="ml-1.5 h-10 rounded-[10px] px-3 text-[16px] text-muted"
-              >
-                取消
-              </button>
-            </>
-          ) : (
-            <button
-              type="button"
-              onClick={() => {
-                setNewDate(d.bizDate);
-                setRedating(true);
-              }}
-              title="改业务日期"
-              className="rounded-[8px] px-1.5 underline decoration-dotted underline-offset-4 hover:bg-brand-50 hover:text-brand-900"
-            >
-              {d.bizDate}
-            </button>
-          )}
-          　{d.settleType === 'cash' ? '现金' : `挂账 · ${d.customerName ?? ''}`}
+          #{d.id}　{d.bizDate}
+          {d.settleType === 'cash' ? '现金' : `挂账 · ${d.customerName ?? ''}`}
           {d.rev > 1 && `　第 ${d.rev} 版`}
         </span>
         <span className="grow" />
@@ -282,6 +247,68 @@ export default function SaleDetail() {
       </div>
 
       <Flash value={flash} className="shrink-0" />
+
+      {/* 一个字段不值得占一整套编辑态（改单和退货各占一个），弹个小框就够 */}
+      <Modal open={redating} onClose={() => setRedating(false)} title="改这张单的日期">
+        <div className="mb-1 text-[19px]">{d.items[0]?.name ?? ''}{d.items.length > 1 && ` 等 ${d.items.length} 样`}</div>
+        <div className="num mb-5 text-[17px] text-ink-2">¥{d.total}</div>
+
+        <div className="flex items-end gap-4">
+          <div className="text-[16px] text-ink-2">
+            原来记在
+            <div className="num mt-1.5 text-[19px] text-ink">{d.bizDate}</div>
+          </div>
+          <div className="pb-1 text-[18px] text-muted">→</div>
+          <label className="flex flex-col gap-1.5 text-[16px] text-ink-2">
+            改到
+            <input
+              type="date"
+              autoFocus
+              value={newDate}
+              onChange={(e) => setNewDate(e.target.value)}
+              // 焦点在框里时全局 Esc 不响应（useHotkeys 把普通键让给输入框），
+              // 就地接一下。顺带回车即确认 —— 这一屏本来就该一只手按完
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') setRedating(false);
+                if (e.key === 'Enter' && newDate !== d.bizDate) setDate.mutate(newDate);
+              }}
+              aria-label="改到哪天"
+              className="num h-13 w-[190px] rounded-[10px] border border-line bg-card px-3 text-[19px]"
+            />
+          </label>
+        </div>
+
+        <div className="mt-5 rounded-xl bg-page px-5 py-4 text-[16px] leading-relaxed text-ink-2">
+          金额、商品、成本都不动，只是这笔生意算在哪天。
+          {/* 挂账单的核销按日期排 FIFO，改了日期账龄就变了 —— 这事得先说 */}
+          {d.settleType === 'credit' && (
+            <>
+              <br />
+              这是挂账单，改完之后 <span className="font-medium text-ink">{d.customerName ?? '客户'}</span>{' '}
+              的账龄和核销会跟着重算。
+            </>
+          )}
+        </div>
+
+        <div className="mt-6 flex justify-end gap-3">
+          {/* 焦点默认在日期框上，所以取消不抢 autoFocus */}
+          <button
+            type="button"
+            onClick={() => setRedating(false)}
+            className="h-13 rounded-[10px] border border-line bg-card px-5 text-[18px]"
+          >
+            不改了
+          </button>
+          <button
+            type="button"
+            onClick={() => setDate.mutate(newDate)}
+            disabled={setDate.isPending || newDate === d.bizDate}
+            className="h-13 rounded-[10px] bg-brand-700 px-6 text-[18px] font-semibold text-white disabled:opacity-40"
+          >
+            {setDate.isPending ? '改着…' : '改到这天'}
+          </button>
+        </div>
+      </Modal>
 
       <div className="flex min-h-0 grow gap-5">
         <Card className="flex min-w-0 grow flex-col">
@@ -489,6 +516,18 @@ export default function SaleDetail() {
                 >
                   退货
                 </button>
+                {/* 比前两个轻一档：改日期不动金额也不动库存，用得也少得多 */}
+                <button
+                  type="button"
+                  disabled={!!d.voidedAt}
+                  onClick={() => {
+                    setNewDate(d.bizDate);
+                    setRedating(true);
+                  }}
+                  className="h-15 w-36 shrink-0 rounded-xl border border-line text-[19px] disabled:opacity-40"
+                >
+                  改日期
+                </button>
               </>
             )}
             {mode === 'edit' && (
@@ -540,6 +579,8 @@ export default function SaleDetail() {
             是"当时就录错了"，改完就像没错过。
             <strong className="font-semibold text-ink-2">退货</strong>
             是"卖出去了又退回来"，算在退货当天，不动当时的营业额。
+            <strong className="font-semibold text-ink-2">改日期</strong>
+            是"这笔生意其实是那天做的"，补录用，金额和商品都不动。
           </div>
         </Card>
 

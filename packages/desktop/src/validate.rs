@@ -29,6 +29,35 @@ pub fn check_biz_date(s: &str) -> Result<()> {
     Ok(())
 }
 
+/// 一天（YYYY-MM-DD）或者一个月（YYYY-MM）。
+///
+/// 单据列表按天看也按月看，两种都是「biz_date 的前缀」——
+/// 查询用一条 LIKE 前缀就够，但**得先确认它真是个前缀**：
+/// 放一个 `2026-0` 进去会把 1 到 9 月全捞出来，而界面上只写着「2026-0」。
+pub fn check_day_or_month(s: &str) -> Result<()> {
+    match s.len() {
+        10 => check_biz_date(s),
+        7 => {
+            let ok = s.as_bytes()[4] == b'-'
+                && s.bytes().enumerate().all(|(i, b)| if i == 4 { b == b'-' } else { b.is_ascii_digit() });
+            let month: u32 = s[5..].parse().unwrap_or(0);
+            if !ok || !(1..=12).contains(&month) {
+                bail!("月份应为 YYYY-MM，收到：{s}");
+            }
+            Ok(())
+        }
+        _ => bail!("应为某一天 YYYY-MM-DD 或某个月 YYYY-MM，收到：{s}"),
+    }
+}
+
+/// 只认月份 YYYY-MM。导出区间用
+pub fn check_month(s: &str) -> Result<()> {
+    if s.len() != 7 {
+        bail!("月份应为 YYYY-MM，收到：{s}");
+    }
+    check_day_or_month(s)
+}
+
 pub fn check_items_not_empty(len: usize) -> Result<()> {
     ensure!(len > 0, "至少要有一个商品");
     Ok(())
@@ -50,6 +79,26 @@ mod tests {
         assert!(check_biz_date("2026-9-5").is_err());
         assert!(check_biz_date("").is_err());
         assert!(check_biz_date("今天").is_err());
+    }
+
+    #[test]
+    fn 一天或者一个月都认() {
+        assert!(check_day_or_month("2026-09-20").is_ok());
+        assert!(check_day_or_month("2026-09").is_ok());
+        assert!(check_day_or_month("2026-01").is_ok());
+        assert!(check_day_or_month("2026-12").is_ok());
+    }
+
+    #[test]
+    fn 半截前缀不能放过去() {
+        // 它是拿去做 LIKE 前缀的。「2026-0」会把 1 到 9 月全捞出来，
+        // 而界面上只写着「2026-0」—— 数字大得莫名其妙且查不出原因
+        assert!(check_day_or_month("2026-0").is_err());
+        assert!(check_day_or_month("2026").is_err());
+        assert!(check_day_or_month("2026-13").is_err(), "没有 13 月");
+        assert!(check_day_or_month("2026-00").is_err());
+        assert!(check_day_or_month("2026/09").is_err());
+        assert!(check_day_or_month("").is_err());
     }
 
     #[test]
