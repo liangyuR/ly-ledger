@@ -4,6 +4,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, endpoints, type Product } from '../api/client';
 import FirstSaleHint from '../components/FirstSaleHint';
 import { Card } from '../components/Card';
+import { Flash } from '../components/Flash';
+import { Modal } from '../components/Modal';
 import { useHotkeys } from '../hooks/useHotkeys';
 import { centsToYuan, formatYuan, lineAmountCents, yuanToCents } from '../money';
 
@@ -73,6 +75,9 @@ export default function Sell() {
 
   /** 搜不到时就地建商品。商品库不全不能阻塞记账（docs/01） */
   const [creating, setCreating] = useState<{ name: string; unit: string; price: string } | null>(null);
+
+  /** 挂账时搜不到客户，就地建一个，建好自动选中，不用跳去挂账归还页 */
+  const [creatingCustomer, setCreatingCustomer] = useState<{ name: string; phone: string } | null>(null);
 
   const searchRef = useRef<HTMLInputElement>(null);
   const qtyRef = useRef<HTMLInputElement>(null);
@@ -204,6 +209,32 @@ export default function Sell() {
     });
   }
 
+  const createCustomer = useMutation({
+    mutationFn: (body: unknown) => api.post<{ customerId: number }>('/api/customers', body),
+    onSuccess: (r, vars) => {
+      const v = vars as { name: string };
+      // 建好直接选中，接着走挂账，不用再搜一遍
+      setCustomer({ id: r.customerId, name: v.name });
+      setCreatingCustomer(null);
+      setCustQuery('');
+      setFlash({ tone: 'ok', text: `建好了「${v.name}」，已选中` });
+      qc.invalidateQueries({ queryKey: ['customers'] });
+    },
+    onError: (e) => setFlash({ tone: 'bad', text: (e as Error).message }),
+  });
+
+  function submitNewCustomer() {
+    if (!creatingCustomer) return;
+    if (!creatingCustomer.name.trim()) {
+      setFlash({ tone: 'bad', text: '填个客户名' });
+      return;
+    }
+    createCustomer.mutate({
+      name: creatingCustomer.name.trim(),
+      phone: creatingCustomer.phone.trim() || undefined,
+    });
+  }
+
   const checkout = useMutation({
     mutationFn: (body: unknown) => endpoints.checkout(body),
     onSuccess: (r) => {
@@ -282,9 +313,12 @@ export default function Sell() {
     F7: () => openCredit('partial'),
     Escape: () => {
       if (mode !== 'cart') {
-        setMode('cart');
-        setCustomer(null);
-        setCustQuery('');
+        if (creatingCustomer) setCreatingCustomer(null);
+        else {
+          setMode('cart');
+          setCustomer(null);
+          setCustQuery('');
+        }
       } else if (creating) setCreating(null);
       else if (pending) backToSearch();
       else if (cart.length) setCart([]);
@@ -350,7 +384,6 @@ export default function Sell() {
             className="num h-12 w-[200px] rounded-[10px] border border-line bg-card px-4 text-[19px]"
           />
         </label>
-        <span className="text-[16px] text-muted">补录昨天的单就改这里</span>
       </div>
 
       <div className="flex min-h-0 grow gap-5">
@@ -493,7 +526,22 @@ export default function Sell() {
                 />
               </label>
               <span className="grow" />
-              <span className="text-[16px] text-ink-2">Enter 加入　Esc 取消</span>
+              <button
+                type="button"
+                onClick={backToSearch}
+                className="flex h-13 items-center gap-2.5 rounded-[10px] border border-line bg-card px-5 text-[18px]"
+              >
+                <span className="num text-[13px] font-medium text-muted">Esc</span>
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={addToCart}
+                className="flex h-13 items-center gap-2.5 rounded-[10px] bg-brand-700 px-6 text-[18px] font-semibold text-white"
+              >
+                <span className="num text-[13px] font-medium text-[#BFE0D4]">Enter</span>
+                加入
+              </button>
             </div>
           )}
 
@@ -535,23 +583,26 @@ export default function Sell() {
           <div className="min-h-0 grow overflow-auto">
             {cart.length === 0 && <div className="text-[17px] text-muted">还没选商品</div>}
             {cart.map((l) => (
-              <div key={l.key} className="flex h-[58px] items-center gap-3.5 border-t border-line">
-                <span className="grow text-[20px]">{l.name}</span>
-                <span className="num w-16 text-[18px] text-ink-2">
-                  {l.qty} {l.unitLabel}
-                </span>
-                <span className="num w-20 text-right text-[18px] text-ink-2">¥{l.unitPriceYuan}</span>
-                <span className="num w-28 text-right text-[22px] font-medium">
-                  ¥{formatYuan(l.amountCents)}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setCart((c) => c.filter((x) => x.key !== l.key))}
-                  aria-label={`删掉 ${l.name}`}
-                  className="text-[16px] text-muted hover:text-danger"
-                >
-                  ✕
-                </button>
+              <div key={l.key} className="flex flex-col gap-1.5 border-t border-line py-3.5">
+                <div className="flex items-start gap-3">
+                  <span className="grow text-[19px] leading-snug break-words">{l.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => setCart((c) => c.filter((x) => x.key !== l.key))}
+                    aria-label={`删掉 ${l.name}`}
+                    className="shrink-0 rounded-full px-2 text-[18px] text-muted hover:text-danger"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className="num text-[16px] text-ink-2">
+                    {l.qty} {l.unitLabel} × ¥{l.unitPriceYuan}
+                  </span>
+                  <span className="num shrink-0 text-[22px] font-medium">
+                    ¥{formatYuan(l.amountCents)}
+                  </span>
+                </div>
               </div>
             ))}
           </div>
@@ -578,20 +629,9 @@ export default function Sell() {
                 ¥{formatYuan(totalCents)}
               </span>
             </div>
-            <div className="-mt-2 text-right text-[15px] text-muted">
-              抹零输的是让掉的钱，不改单价
-            </div>
           </div>
 
-          {flash && (
-            <div
-              className={`mt-4 rounded-xl px-5 py-3.5 text-[17px] ${
-                flash.tone === 'ok' ? 'bg-brand-50 text-brand-900' : 'bg-danger-50 text-danger'
-              }`}
-            >
-              {flash.text}
-            </div>
-          )}
+          <Flash value={flash} className="mt-4" />
 
           {mode === 'cart' ? (
             <div className="mt-6 flex flex-col gap-3.5">
@@ -601,7 +641,6 @@ export default function Sell() {
                 disabled={checkout.isPending}
                 className="flex h-19 items-center justify-center gap-3 rounded-xl bg-brand-700 text-[22px] font-semibold text-white disabled:opacity-60"
               >
-                <span className="num text-[14px] font-medium text-[#BFE0D4]">F8</span>
                 {checkout.isPending ? '处理中…' : '现金收讫'}
               </button>
               <div className="flex gap-3.5">
@@ -610,25 +649,34 @@ export default function Sell() {
                   onClick={() => openCredit('credit')}
                   className="flex h-14 grow items-center justify-center gap-2.5 rounded-xl border border-line bg-card text-[19px] font-semibold"
                 >
-                  <span className="num text-[14px] font-medium text-muted">F9</span>挂账
+                  挂账
                 </button>
                 <button
                   type="button"
                   onClick={() => openCredit('partial')}
                   className="flex h-14 grow items-center justify-center gap-2.5 rounded-xl border border-line bg-card text-[19px] font-semibold"
                 >
-                  <span className="num text-[14px] font-medium text-muted">F7</span>部分付
+                  部分付
                 </button>
-              </div>
-              <div className="text-center text-[15px] text-muted">
-                九成单子按 F8 一键完成，不弹窗、不确认
               </div>
             </div>
           ) : (
             <div className="mt-6 flex flex-col gap-3.5 border-t-2 border-line pt-5">
               <div className="flex items-baseline gap-3">
                 <h3 className="m-0 text-[19px] font-semibold">挂给谁</h3>
-                <span className="text-[16px] text-muted">Esc 退回现金结账</span>
+                <span className="grow" />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode('cart');
+                    setCustomer(null);
+                    setCustQuery('');
+                  }}
+                  className="flex items-center gap-2 rounded-[8px] px-3 py-1.5 text-[16px] text-ink-2"
+                >
+                  <span className="num text-[13px] font-medium text-muted">Esc</span>
+                  退回现金结账
+                </button>
               </div>
 
               <input
@@ -655,12 +703,64 @@ export default function Sell() {
                     {c.name}
                   </button>
                 ))}
-                {(customers.data?.items.length ?? 0) === 0 && (
-                  <span className="text-[17px] text-muted">
-                    没找到客户。先去挂账归还页或后台建一个
-                  </span>
+                {(customers.data?.items.length ?? 0) === 0 && !creatingCustomer && (
+                  <button
+                    type="button"
+                    onClick={() => setCreatingCustomer({ name: custQuery.trim(), phone: '' })}
+                    className="h-13 rounded-[10px] border border-dashed border-line px-5 text-[19px] text-ink-2"
+                  >
+                    没找到，新建「{custQuery.trim() || '客户'}」
+                  </button>
                 )}
               </div>
+
+              <Modal open={!!creatingCustomer} onClose={() => setCreatingCustomer(null)} title="新建客户">
+                <div className="mb-5 text-[16px] text-ink-2">建好自动选中，接着挂这单</div>
+                <div className="flex flex-col gap-4">
+                  <label className="flex flex-col gap-2 text-[16px] text-ink-2">
+                    客户名
+                    <input
+                      autoFocus
+                      value={creatingCustomer?.name ?? ''}
+                      onChange={(e) =>
+                        setCreatingCustomer((c) => c && { ...c, name: e.target.value })
+                      }
+                      onKeyDown={(e) => e.key === 'Enter' && submitNewCustomer()}
+                      aria-label="新客户名"
+                      className="h-13 w-full rounded-[10px] border border-line bg-card px-3 text-[19px]"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-2 text-[16px] text-ink-2">
+                    电话<span className="text-muted">（选填）</span>
+                    <input
+                      value={creatingCustomer?.phone ?? ''}
+                      onChange={(e) =>
+                        setCreatingCustomer((c) => c && { ...c, phone: e.target.value })
+                      }
+                      onKeyDown={(e) => e.key === 'Enter' && submitNewCustomer()}
+                      aria-label="新客户电话"
+                      className="num h-13 w-full rounded-[10px] border border-line bg-card px-3 text-[19px]"
+                    />
+                  </label>
+                </div>
+                <div className="mt-6 flex justify-end gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setCreatingCustomer(null)}
+                    className="h-13 rounded-[10px] border border-line bg-card px-5 text-[18px]"
+                  >
+                    取消
+                  </button>
+                  <button
+                    type="button"
+                    onClick={submitNewCustomer}
+                    disabled={createCustomer.isPending}
+                    className="h-13 rounded-[10px] bg-brand-700 px-6 text-[18px] font-semibold text-white disabled:opacity-60"
+                  >
+                    建好并选中
+                  </button>
+                </div>
+              </Modal>
 
               {/* 只有按了 F7 才出现这两行 —— 部分付是第三条路径，不得污染前两条 */}
               {mode === 'partial' && (
@@ -708,7 +808,6 @@ export default function Sell() {
                 disabled={checkout.isPending || !customer}
                 className="mt-2 flex h-19 items-center justify-center gap-3 rounded-xl bg-brand-700 text-[22px] font-semibold text-white disabled:opacity-40"
               >
-                <span className="num text-[14px] font-medium text-[#BFE0D4]">F8</span>
                 {checkout.isPending ? '处理中…' : '确认'}
               </button>
             </div>

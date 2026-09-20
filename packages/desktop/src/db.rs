@@ -17,6 +17,8 @@ use crate::error::Result;
 const MIGRATIONS: &[(&str, &str)] = &[
     ("001_init.sql", include_str!("../migrations/001_init.sql")),
     ("002_settings.sql", include_str!("../migrations/002_settings.sql")),
+    ("003_expenses.sql", include_str!("../migrations/003_expenses.sql")),
+    ("004_services.sql", include_str!("../migrations/004_services.sql")),
 ];
 
 /// 打开一个连接并设好 pragma。
@@ -117,7 +119,7 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(n, 12, "11 张业务表 + app_settings");
+        assert_eq!(n, 13, "12 张业务表 + app_settings");
     }
 
     #[test]

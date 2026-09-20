@@ -25,7 +25,7 @@ export class ApiError extends Error {
 }
 
 type Args = Record<string, unknown>;
-type Method = 'GET' | 'POST' | 'PATCH';
+type Method = 'GET' | 'POST' | 'PATCH' | 'DELETE';
 
 /**
  * 路径 → 命令名。
@@ -53,7 +53,14 @@ function route(method: Method, path: string, body?: unknown): [string, Args] {
       if (method === 'POST' && !second) return ['product_create', { input: b }];
       if (method === 'POST' && second === 'parse-import') return ['products_parse_import', b];
       if (method === 'POST' && second === 'import') return ['products_import', b];
+      if (method === 'POST' && second === 'sheet-preview') return ['products_sheet_preview', {}];
+      if (method === 'POST' && second === 'sheet-import') return ['products_sheet_import', b];
       if (method === 'PATCH') return ['product_update', { id, patch: b }];
+      if (method === 'DELETE') return ['product_delete', { id }];
+      break;
+
+    case 'stock':
+      if (method === 'GET' && !second) return ['stock_overview', {}];
       break;
 
     case 'seed':
@@ -65,6 +72,7 @@ function route(method: Method, path: string, body?: unknown): [string, Args] {
       if (method === 'GET' && !second) return ['customers_list', { q: query.get('q') ?? undefined }];
       if (method === 'GET' && second === 'debts') return ['customers_debts', {}];
       if (method === 'GET' && third === 'debt') return ['customer_debt', { id }];
+      if (method === 'GET' && third === 'statement') return ['customer_statement', { id }];
       if (method === 'POST' && !second) return ['customer_create', b];
       if (method === 'POST' && third === 'rebuild-allocations')
         return ['customer_rebuild_allocations', { id }];
@@ -85,6 +93,7 @@ function route(method: Method, path: string, body?: unknown): [string, Args] {
       break;
 
     case 'purchases':
+      if (method === 'GET' && !second) return ['purchases_recent', {}];
       if (method === 'POST' && second === 'receive') return ['purchases_receive', { input: b }];
       if (method === 'POST' && third === 'void') return ['purchase_void', { id }];
       if (method === 'POST' && third === 'revise') return ['purchase_revise', { id, input: b }];
@@ -93,6 +102,18 @@ function route(method: Method, path: string, body?: unknown): [string, Args] {
     case 'payments':
       if (method === 'POST' && second === 'collect') return ['payments_collect', { input: b }];
       if (method === 'POST' && third === 'void') return ['payment_void', { id }];
+      break;
+
+    case 'expenses':
+      if (method === 'GET') return ['expenses_month', { month: query.get('month') ?? undefined }];
+      if (method === 'POST' && !second) return ['expense_add', { input: b }];
+      if (method === 'POST' && third === 'void') return ['expense_void', { id }];
+      break;
+
+    case 'services':
+      if (method === 'GET' && !second) return ['service_fees_list', {}];
+      if (method === 'GET' && second === 'day')
+        return ['service_fees_day', { date: query.get('date') ?? undefined }];
       break;
 
     case 'reports':
@@ -133,6 +154,7 @@ export const api = {
   get: <T>(path: string) => request<T>('GET', path),
   post: <T>(path: string, body?: unknown) => request<T>('POST', path, body),
   patch: <T>(path: string, body?: unknown) => request<T>('PATCH', path, body),
+  del: <T>(path: string) => request<T>('DELETE', path),
 };
 
 // ── Excel 导出 ──────────────────────────────────────────────

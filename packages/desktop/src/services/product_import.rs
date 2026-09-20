@@ -92,7 +92,33 @@ fn parse_ratio(text: &str) -> Option<(i64, String)> {
     if ratio < 1 || unit.is_empty() {
         return None;
     }
+    // 「43.5」要在这里被拦下 —— 切出来的「.5」非空，不拦就当成单位收了，
+    // 建出一个基础单位叫「.5」的商品，而且一声不吭。等发现时库存流水
+    // 已经按这个单位记了一串，改不回来（红线 6：单据不可变）
+    let head = unit.chars().next()?;
+    if !head.is_alphabetic() || unit.chars().any(|c| c.is_ascii_digit()) {
+        return None;
+    }
     Some((ratio, unit))
+}
+
+/// 光一串数字（带不带小数点都算）。价格长这样，换算不长这样。
+fn looks_like_number(s: &str) -> bool {
+    let t = s.trim();
+    !t.is_empty() && t.chars().all(|c| c.is_ascii_digit() || c == '.')
+}
+
+/// 第三段没读懂时说的那句话。
+///
+/// 店里的清单十有八九是「名称 - 单位 - 价格」—— 那是老板自己记价用的格式。
+/// 对着一个价格说「应写成 10包 这样」，他只会把 40 改成 40包，
+/// 于是建出一个「1 盒 = 40 包」的商品。话要说到他那一行上。
+fn ratio_hint(name: &str, pack_unit: &str, third: &str) -> String {
+    if looks_like_number(third) {
+        format!("「{third}」像是价格，这一段填的是换算。单卖就写两段「{name} - {pack_unit}」；一{pack_unit}装 10 包才写「{name} - {pack_unit} - 10包」。价格不在这儿填，导完去商品页批量填")
+    } else {
+        format!("换算看不懂：「{third}」。应写成「10包」这样")
+    }
 }
 
 fn parse_line(raw: &str) -> ParsedRow {
@@ -151,10 +177,7 @@ fn parse_line(raw: &str) -> ParsedRow {
         return ParsedRow::bad(raw, "包装单位为空");
     }
     let Some((ratio, base_unit)) = parse_ratio(&parts[2]) else {
-        return ParsedRow::bad(
-            raw,
-            &format!("换算看不懂：「{}」。应写成「10包」这样", parts[2]),
-        );
+        return ParsedRow::bad(raw, &ratio_hint(&name, &pack_unit, &parts[2]));
     };
 
     ParsedRow {
@@ -300,6 +323,48 @@ mod tests {
         assert_eq!(
             r.rows[1].raw, "青岛啤酒 一箱24",
             "原文要留着，老板才知道改哪行"
+        );
+    }
+
+
+
+    #[test]
+    fn 小数价格不会被当成换算() {
+        // 「43.5」原来切成 43 + 单位「.5」，一声不吭建出一个基础单位叫「.5」的商品。
+        // 等发现时库存流水已经按这个单位记了一串
+        let conn = open_memory().unwrap();
+        let r = parse_product_list(&conn, "天香细支 - 盒 - 43.5").unwrap();
+        assert!(!r.rows[0].ok, "小数价格不是换算");
+        assert_eq!(r.summary.create, 0);
+        assert!(r.rows[0].reason.as_deref().unwrap().contains("像是价格"));
+    }
+
+    #[test]
+    fn 第三段是价格时提示说到他那一行上() {
+        // 「应写成 10包 这样」对着一个价格说，他只会把 65 改成 65饼
+        let conn = open_memory().unwrap();
+        let r = parse_product_list(&conn, "老白茶 - 饼 - 65").unwrap();
+        let reason = r.rows[0].reason.as_deref().unwrap();
+        assert!(!r.rows[0].ok);
+        assert!(reason.contains("老白茶 - 饼"), "要给出他这一行怎么改：{reason}");
+        assert!(reason.contains("商品页"), "价格该去哪儿填也要说：{reason}");
+    }
+
+    #[test]
+    fn 茶叶那几种单位照常认() {
+        // 单位是自由文本，不是枚举 —— 拦了就得为每个新品类改一次代码
+        let conn = open_memory().unwrap();
+        let text = "老白茶 - 饼
+信阳毛尖A - 斤
+大红袍 - 盒
+古树红茶 - 套
+宝福林 - 罐
+小青柑 - 桶";
+        let r = parse_product_list(&conn, text).unwrap();
+        assert_eq!(r.summary.create, 6, "六种单位都该认");
+        assert_eq!(
+            r.rows.iter().filter_map(|x| x.base_unit.as_deref()).collect::<Vec<_>>(),
+            vec!["饼", "斤", "盒", "套", "罐", "桶"]
         );
     }
 

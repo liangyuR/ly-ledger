@@ -105,9 +105,16 @@ fn err_of<T>(r: Result<T>) -> String {
     r.err().expect("这一步本该被拒绝").to_string()
 }
 
+mod bulk;
+mod expenses;
+mod frequent;
 mod invariants;
 mod ledger;
 mod onboarding;
 mod pricing;
+mod products;
 mod reports;
+mod service_fees;
+mod statements;
+mod stock;
 mod reversals;

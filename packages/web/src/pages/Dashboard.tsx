@@ -1,10 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
+import { motion } from 'motion/react';
 import { useNavigate } from 'react-router-dom';
 
 import { api } from '../api/client';
-import BackupCard from '../components/BackupCard';
 import { Card, Figure } from '../components/Card';
 import OnboardingChecklist from '../components/OnboardingChecklist';
+import { rowIn } from '../lib/animations';
 
 interface Dashboard {
   date: string;
@@ -89,9 +90,9 @@ export default function Dashboard() {
 
       <div className="flex shrink-0 gap-5">
         <Figure label="今日营业额" value={`¥${d?.todayRevenue ?? '—'}`} sub={d?.date} />
-        <Figure label="今日毛利" value={`¥${d?.todayProfit ?? '—'}`} sub="不含房租、水电、人工" tone="brand" />
-        <Figure label="本月毛利" value={`¥${d?.monthProfit ?? '—'}`} sub="不含房租、水电、人工" tone="brand" />
-        <Figure label="库存金额" value={`¥${d?.inventoryValue ?? '—'}`} sub="按加权成本" />
+        <Figure label="今日毛利" value={`¥${d?.todayProfit ?? '—'}`} tone="brand" />
+        <Figure label="本月毛利" value={`¥${d?.monthProfit ?? '—'}`} tone="brand" />
+        <Figure label="库存金额" value={`¥${d?.inventoryValue ?? '—'}`} />
       </div>
 
       <div className="flex h-80 shrink-0 gap-5">
@@ -109,10 +110,14 @@ export default function Dashboard() {
           </div>
           <div className="min-h-0 grow overflow-auto">
             {owing.length === 0 && <div className="pt-4 text-[17px] text-muted">没人欠钱</div>}
-            {owing.map((c) => {
+            {owing.map((c, i) => {
               const old = (c.agingDays ?? 0) > 30;
               return (
-                <div key={c.customerId} className="flex h-17 items-center gap-4.5 border-t border-line">
+                <motion.div
+                  key={c.customerId}
+                  {...rowIn(i)}
+                  className="flex h-17 items-center gap-4.5 border-t border-line"
+                >
                   <span className="w-28 text-[20px]">{c.name}</span>
                   <span className="num text-[28px] font-medium">¥{c.amount}</span>
                   {/* 账龄用天数说话，不只靠颜色 —— 色盲的人也要能看出谁拖得久 */}
@@ -131,7 +136,7 @@ export default function Dashboard() {
                   >
                     收款
                   </button>
-                </div>
+                </motion.div>
               );
             })}
           </div>
@@ -142,20 +147,23 @@ export default function Dashboard() {
             {(d?.alerts.length ?? 0) === 0 && (
               <div className="text-[17px] text-muted">没什么要紧的</div>
             )}
-            {d?.alerts.map((a) => (
-              <div key={a.kind} className="flex gap-3.5 border-t border-line py-4 first:border-t-0">
+            {d?.alerts.map((a, i) => (
+              <motion.div
+                key={a.kind}
+                {...rowIn(i)}
+                className="flex gap-3.5 border-t border-line py-4 first:border-t-0"
+              >
                 <WarnIcon danger={a.kind !== 'stale'} />
                 <div>
                   <div className="text-[19px]">{ALERT_TITLE[a.kind](a.count)}</div>
                   <div className="mt-1 text-[16px] text-ink-2">{a.detail}</div>
                 </div>
-              </div>
+              </motion.div>
             ))}
           </div>
         </Card>
       </div>
 
-      <BackupCard />
 
       <Card
         title="今日流水"
@@ -165,9 +173,10 @@ export default function Dashboard() {
         {(d?.recentSales.length ?? 0) === 0 && (
           <div className="text-[17px] text-muted">今天还没开张</div>
         )}
-        {d?.recentSales.map((s) => (
-          <button
+        {d?.recentSales.map((s, i) => (
+          <motion.button
             key={s.id}
+            {...rowIn(i)}
             type="button"
             onClick={() => navigate(`/sales/${s.id}`)}
             className="flex h-13 w-full items-center gap-6 border-t border-line text-left text-[19px] hover:bg-page"
@@ -183,7 +192,7 @@ export default function Dashboard() {
             >
               {s.settleType === 'credit' ? `挂账 · ${s.customerName ?? ''}` : '现金'}
             </span>
-          </button>
+          </motion.button>
         ))}
       </Card>
     </>

@@ -56,6 +56,8 @@ struct SaleItemRow {
     amount_cents: i64,
     unit_cost_base_e4: i64,
     cost_amount_cents: i64,
+    /// 服务型收费：当初没扣库存，现在也就没有库存可还
+    is_service: bool,
 }
 
 fn load_sale(conn: &Connection, sale_id: i64) -> Result<SaleRow> {
@@ -85,9 +87,10 @@ fn load_sale(conn: &Connection, sale_id: i64) -> Result<SaleRow> {
 
 fn load_items(conn: &Connection, sale_id: i64) -> Result<Vec<SaleItemRow>> {
     let mut stmt = conn.prepare(
-        "SELECT product_id, unit, qty_milli, qty_base_milli, unit_price_cents,
-                amount_cents, unit_cost_base_e4, cost_amount_cents
-           FROM sale_items WHERE sale_id = ?1 ORDER BY id",
+        "SELECT si.product_id, si.unit, si.qty_milli, si.qty_base_milli, si.unit_price_cents,
+                si.amount_cents, si.unit_cost_base_e4, si.cost_amount_cents, p.is_service
+           FROM sale_items si JOIN products p ON p.id = si.product_id
+          WHERE si.sale_id = ?1 ORDER BY si.id",
     )?;
     let rows = stmt.query_map([sale_id], |r| {
         Ok((
@@ -99,12 +102,13 @@ fn load_items(conn: &Connection, sale_id: i64) -> Result<Vec<SaleItemRow>> {
             r.get::<_, i64>(5)?,
             r.get::<_, i64>(6)?,
             r.get::<_, i64>(7)?,
+            r.get::<_, bool>(8)?,
         ))
     })?;
 
     let mut out = Vec::new();
     for row in rows {
-        let (product_id, unit, qty_milli, qty_base_milli, unit_price_cents, amount_cents, unit_cost_base_e4, cost_amount_cents) = row?;
+        let (product_id, unit, qty_milli, qty_base_milli, unit_price_cents, amount_cents, unit_cost_base_e4, cost_amount_cents, is_service) = row?;
         out.push(SaleItemRow {
             product_id,
             unit: Unit::parse(&unit)?,
@@ -114,6 +118,7 @@ fn load_items(conn: &Connection, sale_id: i64) -> Result<Vec<SaleItemRow>> {
             amount_cents,
             unit_cost_base_e4,
             cost_amount_cents,
+            is_service,
         });
     }
     Ok(out)
@@ -139,6 +144,10 @@ pub fn void_sale(conn: &Connection, sale_id: i64, reason: VoidReason) -> Result<
     let mut restored = 0;
 
     for item in load_items(conn, sale_id)? {
+        // 服务当初没扣过库存，现在也没有货可还
+        if item.is_service {
+            continue;
+        }
         // 用**原单的成本快照**把货加回去，不是当前均价
         record_movement(
             conn,
@@ -261,6 +270,7 @@ struct ReturnLine {
     amount_cents: i64,
     unit_cost_e4: i64,
     cost_cents: i64,
+    is_service: bool,
 }
 
 /// 退货 —— 这笔生意发生了，后来退了。
@@ -349,6 +359,7 @@ pub fn return_sale(
             amount_cents: -scale(src.amount_cents)?,
             unit_cost_e4: src.unit_cost_base_e4,
             cost_cents: -scale(src.cost_amount_cents)?,
+            is_service: src.is_service,
         });
     }
 
@@ -393,19 +404,22 @@ pub fn return_sale(
             ],
         )?;
 
-        record_movement(
-            conn,
-            MovementInput {
-                biz_date: &input.biz_date,
-                product_id: l.product_id,
-                kind: MovementType::Return,
-                qty_base_milli: -l.qty_base_milli, // 货回来了，正数入库
-                unit_cost_e4: l.unit_cost_e4,
-                ref_type: "sale_return",
-                ref_id: return_sale_id,
-                reverse_of: None,
-            },
-        )?;
+        // 退桌子费只是把钱退回去，没有货回来
+        if !l.is_service {
+            record_movement(
+                conn,
+                MovementInput {
+                    biz_date: &input.biz_date,
+                    product_id: l.product_id,
+                    kind: MovementType::Return,
+                    qty_base_milli: -l.qty_base_milli, // 货回来了，正数入库
+                    unit_cost_e4: l.unit_cost_e4,
+                    ref_type: "sale_return",
+                    ref_id: return_sale_id,
+                    reverse_of: None,
+                },
+            )?;
+        }
     }
 
     if let Some(cid) = original.customer_id {

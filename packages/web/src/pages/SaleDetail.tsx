@@ -4,6 +4,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 
 import { api, endpoints, type Product } from '../api/client';
 import { Card } from '../components/Card';
+import { Flash } from '../components/Flash';
 import { useHotkeys } from '../hooks/useHotkeys';
 import { formatYuan, lineAmountCents, yuanToCents } from '../money';
 
@@ -219,15 +220,7 @@ export default function SaleDetail() {
         )}
       </div>
 
-      {flash && (
-        <div
-          className={`shrink-0 rounded-xl px-5 py-3.5 text-[17px] ${
-            flash.tone === 'ok' ? 'bg-brand-50 text-brand-900' : 'bg-danger-50 text-danger'
-          }`}
-        >
-          {flash.text}
-        </div>
-      )}
+      <Flash value={flash} className="shrink-0" />
 
       <div className="flex min-h-0 grow gap-5">
         <Card className="flex min-w-0 grow flex-col">

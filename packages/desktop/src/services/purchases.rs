@@ -192,3 +192,83 @@ pub fn receive(conn: &Connection, input: &ReceiveInput) -> Result<ReceiveResult>
         warnings,
     })
 }
+
+// ─────────────────────────── 最近入库 ───────────────────────────
+
+/// 进货页右边那张「最近入库」表的一行。
+///
+/// 撤销的前提是**先找得到那一单**。录错一批货，老板记得的是
+/// 「刚才那单」「昨天进的中华」，不是单号 —— 所以这里带上日期、时分和
+/// 一句话摘要，让他靠眼睛认单。
+#[derive(Debug, serde::Serialize)]
+pub struct PurchaseListRow {
+    pub id: i64,
+    pub biz_date: String,
+    /// created_at 的 HH:MM。同一天进两回货时靠它分辨
+    pub time: String,
+    pub summary: String,
+    #[serde(skip)]
+    pub total_cents: i64,
+    /// 撤过的单留在表里，标一下。凭空消失会让老板以为自己撤错了别的单
+    pub voided: bool,
+}
+
+/// 一句话说清这张进货单进了什么。
+fn summarize(conn: &Connection, purchase_id: i64) -> Result<String> {
+    let rows: Vec<(String, String, Option<String>, String, i64)> = {
+        let mut stmt = conn.prepare(
+            "SELECT p.name, p.base_unit, p.pack_unit, pi.unit, pi.qty_milli
+               FROM purchase_items pi JOIN products p ON p.id = pi.product_id
+              WHERE pi.purchase_id = ?1 ORDER BY pi.id",
+        )?;
+        let it = stmt.query_map([purchase_id], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+        })?;
+        it.collect::<rusqlite::Result<_>>()?
+    };
+
+    let Some((name, base_unit, pack_unit, unit, qty_milli)) = rows.first() else {
+        return Ok("没有明细".to_string());
+    };
+
+    // 按**录入单位**说话：他录的是「3 条」，摘要就该写 3 条，不是 30 包
+    let label = if unit == "pack" {
+        pack_unit.as_deref().unwrap_or(base_unit)
+    } else {
+        base_unit.as_str()
+    };
+    let first = format!("{name} {} {label}", crate::money::milli_to_qty(*qty_milli));
+
+    Ok(if rows.len() > 1 {
+        format!("{first} 等 {} 样", rows.len())
+    } else {
+        first
+    })
+}
+
+/// 最近入库的几单，新的在前。撤过的也列出来，标成已撤销。
+pub fn recent(conn: &Connection, limit: i64) -> Result<Vec<PurchaseListRow>> {
+    let raw: Vec<(i64, String, String, i64, bool)> = {
+        let mut stmt = conn.prepare(
+            "SELECT id, biz_date, created_at, total_amount_cents, voided_at IS NOT NULL
+               FROM purchases ORDER BY id DESC LIMIT ?1",
+        )?;
+        let it = stmt.query_map([limit], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+        })?;
+        it.collect::<rusqlite::Result<_>>()?
+    };
+
+    let mut out = Vec::with_capacity(raw.len());
+    for (id, biz_date, created_at, total_cents, voided) in raw {
+        out.push(PurchaseListRow {
+            id,
+            biz_date,
+            time: created_at.chars().skip(11).take(5).collect(),
+            summary: summarize(conn, id)?,
+            total_cents,
+            voided,
+        });
+    }
+    Ok(out)
+}

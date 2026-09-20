@@ -105,4 +105,39 @@
     font: inherit;
     color: inherit;
   }
+
+  /* 浏览器原生按钮是箭头光标，但界面上大量元素靠样式假装成按钮 ——
+     不给手型光标 + 按下反馈，老板摸鼠标时根本猜不出哪里能点。 */
+  button:not(:disabled),
+  [role='button'] {
+    cursor: pointer;
+  }
+
+  button:disabled {
+    cursor: not-allowed;
+  }
+
+  button:not(:disabled) {
+    transition:
+      transform 120ms ease,
+      filter 120ms ease;
+  }
+
+  button:not(:disabled):hover {
+    filter: brightness(0.97);
+  }
+
+  button:not(:disabled):active {
+    transform: scale(0.97);
+    filter: brightness(0.94);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    button:not(:disabled) {
+      transition: none;
+    }
+    button:not(:disabled):active {
+      transform: none;
+    }
+  }
 }

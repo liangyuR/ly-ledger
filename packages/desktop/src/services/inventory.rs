@@ -162,3 +162,71 @@ pub fn recompute_qty_from_movements(conn: &Connection, product_id: i64) -> Resul
     )?;
     Ok(total)
 }
+
+/// 库存总览：进货页左边那张表。
+///
+/// 字段名故意保持库里的列名（`base_unit` 而不是 `baseUnit`）——
+/// 前端的 Product 接口吃的就是这套名字，点一行就能直接进补货那一步。
+#[derive(Debug, serde::Serialize)]
+pub struct StockLine {
+    pub id: i64,
+    pub name: String,
+    pub base_unit: String,
+    pub pack_unit: Option<String>,
+    pub pack_ratio: i64,
+    pub price_base_cents: Option<i64>,
+    pub price_pack_cents: Option<i64>,
+    #[serde(skip)]
+    pub qty_milli: i64,
+    #[serde(skip)]
+    pub avg_cost_e4: i64,
+    /// 近 90 天补过几次货，列表就按它排
+    #[serde(rename = "restockCount")]
+    pub restock_count: i64,
+}
+
+/// 按「经常补货的在最前面」排。
+///
+/// 补货频次而不是销量 —— 这张表是站在货架前用的，老板要看的是
+/// 「我每周都要补的那几样现在还剩多少」，卖得多但进得少的东西排在前面没用。
+///
+/// 没有结存行就是零库存零成本，不是「查不到」；新店一次货都没进过时
+/// 频次全是 0，自然退回建档顺序 —— 空列表比排错更糟。
+pub fn stock_overview(conn: &Connection, limit: i64) -> Result<Vec<StockLine>> {
+    let day = crate::services::reports::today(conn)?;
+    let mut stmt = conn.prepare(
+        "SELECT p.id, p.name, p.base_unit, p.pack_unit, p.pack_ratio,
+                p.price_base_cents, p.price_pack_cents,
+                COALESCE(i.qty_base_milli, 0)   AS qty_milli,
+                COALESCE(i.avg_cost_base_e4, 0) AS avg_cost_e4,
+                -- 数 pu 不数 pi：作废的单和 90 天以前的单在这个 JOIN 上匹配不到，
+                -- 数 pi 会把它们一起算进来，排序就成了「历史上进得多」
+                COUNT(pu.id) AS restock_count
+           FROM products p
+           LEFT JOIN inventory i      ON i.product_id  = p.id
+           LEFT JOIN purchase_items pi ON pi.product_id = p.id
+           LEFT JOIN purchases pu      ON pu.id = pi.purchase_id
+                AND pu.voided_at IS NULL
+                AND pu.biz_date >= date(?1, '-90 day')
+          -- 服务型收费（桌子费）不进这张表：它没有库存，列出来就是一行永远为 0
+          WHERE p.is_active = 1 AND p.is_service = 0
+          GROUP BY p.id
+          ORDER BY restock_count DESC, p.sort_weight DESC, p.id
+          LIMIT ?2",
+    )?;
+    let rows = stmt.query_map(params![day, limit], |r| {
+        Ok(StockLine {
+            id: r.get(0)?,
+            name: r.get(1)?,
+            base_unit: r.get(2)?,
+            pack_unit: r.get(3)?,
+            pack_ratio: r.get(4)?,
+            price_base_cents: r.get(5)?,
+            price_pack_cents: r.get(6)?,
+            qty_milli: r.get(7)?,
+            avg_cost_e4: r.get(8)?,
+            restock_count: r.get(9)?,
+        })
+    })?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
