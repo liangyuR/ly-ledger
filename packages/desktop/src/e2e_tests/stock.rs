@@ -8,7 +8,7 @@ use super::*;
 use crate::services::inventory::{stock_overview, StockLine};
 
 fn overview(conn: &Connection) -> Vec<StockLine> {
-    stock_overview(conn, 200).unwrap()
+    stock_overview(conn).unwrap()
 }
 
 fn names(rows: &[StockLine]) -> Vec<&str> {
@@ -200,4 +200,83 @@ fn 撤销过的单留在表里标成已撤销() {
     let rows = recent_rows(&conn);
     assert_eq!(rows.len(), 1);
     assert!(rows[0].voided, "痕迹要留着");
+}
+
+// ═══════════════════ 按月分组 ═══════════════════
+//
+// 老板找货是按批次找的：「6 月进的那批茶还剩多少」。
+// 一张按补货频次排的平表回答不了这个问题 —— 6 月和 9 月的货混在一起。
+
+#[test]
+fn 最近进货的月份排在上面() {
+    let mut conn = open_memory().unwrap();
+    let 六月 = new_product(&conn, "老白茶");
+    let 九月 = new_product(&conn, "中华(硬)");
+    let 七月 = new_product(&conn, "玉溪");
+
+    restock(&mut conn, 六月, "2026-06-15");
+    restock(&mut conn, 九月, "2026-09-20");
+    restock(&mut conn, 七月, "2026-07-03");
+
+    assert_eq!(names(&overview(&conn)), vec!["中华(硬)", "玉溪", "老白茶"]);
+}
+
+#[test]
+fn 同一个月里仍然按补货频次排() {
+    // 月份之内，每周都要补的那几样还是该在前面
+    let mut conn = open_memory().unwrap();
+    let 常补 = new_product(&conn, "中华(硬)");
+    let 偶尔 = new_product(&conn, "玉溪");
+
+    restock(&mut conn, 偶尔, "2026-09-02");
+    for day in ["01", "10", "20"] {
+        restock(&mut conn, 常补, &format!("2026-09-{day}"));
+    }
+
+    assert_eq!(names(&overview(&conn)), vec!["中华(硬)", "玉溪"]);
+}
+
+#[test]
+fn 没进过货的排在最后() {
+    // 一次货都没进过的商品没有月份可归。排在前面会把真正有货的挤下去
+    let mut conn = open_memory().unwrap();
+    let 建了没进 = new_product(&conn, "苏烟");
+    let 进过 = new_product(&conn, "中华(硬)");
+    let _ = 建了没进;
+
+    restock(&mut conn, 进过, "2020-01-01");
+
+    assert_eq!(
+        names(&overview(&conn)),
+        vec!["中华(硬)", "苏烟"],
+        "哪怕是六年前进的，也排在从没进过货的前面"
+    );
+}
+
+#[test]
+fn 最近进货日期不受九十天窗口限制() {
+    // 「补过几次」只数 90 天内的，但月份分组得看全部历史 ——
+    // 去年进的货今天还在货架上，它照样得有个月份可归
+    let mut conn = open_memory().unwrap();
+    let id = new_product(&conn, "礼盒装");
+    restock(&mut conn, id, "2025-01-15");
+
+    let row = &overview(&conn)[0];
+    assert_eq!(row.restock_count, 0, "90 天窗口之外，不算常补");
+    assert_eq!(row.last_intake.as_deref(), Some("2025-01-15"), "但月份还在");
+}
+
+#[test]
+fn 撤销过的进货不算最近进货() {
+    let mut conn = open_memory().unwrap();
+    let id = new_product(&conn, "苏烟");
+    restock(&mut conn, id, "2026-06-01");
+    let 撤掉的 = restock(&mut conn, id, "2026-09-20");
+    do_void_purchase(&mut conn, 撤掉的).unwrap();
+
+    assert_eq!(
+        overview(&conn)[0].last_intake.as_deref(),
+        Some("2026-06-01"),
+        "撤掉的那次不该把它顶到 9 月那组去"
+    );
 }

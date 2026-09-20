@@ -20,7 +20,8 @@ use crate::money::{
 use crate::services::{
     backup, excel, expenses, onboarding, payments, product_import, products, profit_reports,
     purchases,
-    rebuild_allocations, reports, reversals, sale_detail, sales, seed_import, service_fees,
+    rebuild_allocations, redate, reports, reversals, sale_detail, sales, seed_import,
+    service_fees,
     sheet_import,
 };
 use crate::sql_json::rows_to_json;
@@ -29,30 +30,12 @@ use crate::{bail, ensure};
 
 // ═══════════════════════ 商品 ═══════════════════════
 
-/// 三路匹配：名称包含、全拼前缀、首字母前缀。
-///
-/// 两个拼音字段都要 —— 只做首字母会逼老板记缩写，只做全拼则打字太多。
+/// 商品列表。搜索规则和「为什么不截断」见 `products::list`。
 #[tauri::command]
 pub fn products_list(state: State<'_, AppState>, q: Option<String>) -> Result<Value> {
     state.with(|conn| {
-        let q = q.as_deref().unwrap_or("").trim().to_string();
-        let items = if q.is_empty() {
-            let mut stmt = conn.prepare(
-                "SELECT * FROM products WHERE is_active = 1 AND is_service = 0
-                  ORDER BY sort_weight DESC, id LIMIT 50",
-            )?;
-            rows_to_json(&mut stmt, [])?
-        } else {
-            let mut stmt = conn.prepare(
-                "SELECT * FROM products
-                  WHERE is_active = 1 AND is_service = 0
-                    AND (name LIKE ?1 OR pinyin_full LIKE ?2 OR pinyin_abbr LIKE ?2)
-                  ORDER BY sort_weight DESC, id
-                  LIMIT 50",
-            )?;
-            rows_to_json(&mut stmt, rusqlite::params![format!("%{q}%"), format!("{q}%")])?
-        };
-        Ok(json!({ "items": items }))
+        let (items, total) = products::list(conn, q.as_deref().unwrap_or(""))?;
+        Ok(json!({ "items": items, "total": total }))
     })
 }
 
@@ -297,7 +280,7 @@ pub fn products_frequent(state: State<'_, AppState>) -> Result<Value> {
 #[tauri::command]
 pub fn stock_overview(state: State<'_, AppState>) -> Result<Value> {
     state.with(|conn| {
-        let items: Vec<Value> = crate::services::inventory::stock_overview(conn, 200)?
+        let items: Vec<Value> = crate::services::inventory::stock_overview(conn)?
             .into_iter()
             .map(|l| {
                 let qty = milli_to_qty(l.qty_milli);
@@ -793,6 +776,93 @@ pub fn purchase_revise(
             "replacedPurchaseId": r.voided_purchase_id,
             "total": cents_to_yuan(r.created.total_cents),
             "warnings": r.created.warnings,
+        }))
+    })
+}
+
+/// 改销售单的业务日期。补录、记错了日子都走这里。
+#[tauri::command]
+pub fn sale_set_date(state: State<'_, AppState>, id: i64, biz_date: String) -> Result<Value> {
+    state.tx(|conn| {
+        let r = redate::set_sale_date(conn, id, &biz_date)?;
+        Ok(json!({ "saleId": r.id, "from": r.from, "to": r.to }))
+    })
+}
+
+/// 某个商品是哪几次进的。库存页点一行商品就查这个。
+#[tauri::command]
+pub fn product_intake(state: State<'_, AppState>, product_id: i64) -> Result<Value> {
+    state.with(|conn| {
+        let items: Vec<Value> = purchases::intake_of(conn, product_id, 50)?
+            .into_iter()
+            .map(|i| {
+                json!({
+                    "purchaseId": i.purchase_id,
+                    "bizDate": i.biz_date,
+                    "time": i.time,
+                    "qty": milli_to_qty(i.qty_milli),
+                    "unitLabel": i.unit_label,
+                    "baseUnit": i.base_unit,
+                    "unitCost": e4_to_yuan(i.unit_cost_base_e4),
+                    "amount": cents_to_yuan(i.amount_cents),
+                    "voided": i.voided,
+                    "otherItems": i.other_items,
+                })
+            })
+            .collect();
+        Ok(json!({ "items": items }))
+    })
+}
+
+/// 一张进货单的明细。改日期、拆单、撤销都从这个框里点。
+#[tauri::command]
+pub fn purchase_detail(state: State<'_, AppState>, id: i64) -> Result<Value> {
+    state.with(|conn| {
+        let d = purchases::detail(conn, id)?;
+        Ok(json!({
+            "id": d.id,
+            "bizDate": d.biz_date,
+            "time": slice_chars(&d.created_at, 11, 5),
+            "total": cents_to_yuan(d.total_cents),
+            "paid": cents_to_yuan(d.paid_cents),
+            "note": d.note,
+            "voided": d.voided,
+            "items": d.items.iter().map(|i| json!({
+                "productId": i.product_id,
+                "name": i.name,
+                "qty": milli_to_qty(i.qty_milli),
+                "unitLabel": i.unit_label,
+                "baseUnit": i.base_unit,
+                "unitCost": e4_to_yuan(i.unit_cost_base_e4),
+                "amount": cents_to_yuan(i.amount_cents),
+            })).collect::<Vec<_>>(),
+        }))
+    })
+}
+
+/// 改进货单的业务日期。
+#[tauri::command]
+pub fn purchase_set_date(state: State<'_, AppState>, id: i64, biz_date: String) -> Result<Value> {
+    state.tx(|conn| {
+        let r = redate::set_purchase_date(conn, id, &biz_date)?;
+        Ok(json!({ "purchaseId": r.id, "from": r.from, "to": r.to }))
+    })
+}
+
+/// 拆进货单：同一个商品分两批进的，录成了一张。
+#[tauri::command]
+pub fn purchase_split(
+    state: State<'_, AppState>,
+    id: i64,
+    input: reversals::SplitInput,
+) -> Result<Value> {
+    state.tx(|conn| {
+        let r = reversals::split_purchase(conn, id, &input)?;
+        Ok(json!({
+            "keptPurchaseId": r.kept_purchase_id,
+            "movedPurchaseId": r.moved_purchase_id,
+            "replacedPurchaseId": r.voided_purchase_id,
+            "warnings": r.warnings,
         }))
     })
 }

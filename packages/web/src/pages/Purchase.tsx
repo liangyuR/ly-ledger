@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 
 import { api, endpoints, type Product } from '../api/client';
 import { Card } from '../components/Card';
@@ -30,8 +30,10 @@ interface StockLine extends Pickable {
   qty: string;
   avgCost: string;
   negative: boolean;
-  /** 近 90 天补过几次货，列表就按它排 */
+  /** 近 90 天补过几次货 */
   restockCount: number;
+  /** 最近一次进货是哪天。列表按它的月份分组，没进过货的是 null */
+  lastIntake: string | null;
 }
 
 /** 最近入库表里的一行。金额是后端格式化好的字符串，前端不做金额运算 */
@@ -45,9 +47,65 @@ interface RecentPurchase {
   voided: boolean;
 }
 
+/** 某个商品是哪几次进的。老板找一批货是按商品找的，不是按单号 */
+interface Intake {
+  purchaseId: number;
+  bizDate: string;
+  time: string;
+  /** 按录入单位：他录的是 3 条，这里就是 3 和「条」 */
+  qty: string;
+  unitLabel: string;
+  baseUnit: string;
+  unitCost: string;
+  amount: string;
+  voided: boolean;
+  /** 这张单里还有别的商品 —— 撤销会一起撤掉，得先说一声 */
+  otherItems: number;
+}
+
+/** 撤销确认框认的东西。最近入库的行和进货记录的行都能喂进来 */
+interface UndoTarget {
+  id: number;
+  bizDate: string;
+  time?: string;
+  summary: string;
+  total: string;
+}
+
+/** 点开一张进货单看到的东西。改日期、拆单、撤销都从这里点 */
+interface PurchaseDetail {
+  id: number;
+  bizDate: string;
+  time: string;
+  total: string;
+  paid: string;
+  voided: boolean;
+  items: {
+    productId: number;
+    name: string;
+    /** 按录入单位：他录的是 3 条，这里就是 3 和「条」 */
+    qty: string;
+    unitLabel: string;
+    baseUnit: string;
+    unitCost: string;
+    amount: string;
+  }[];
+}
+
+/** "2026-09" → "2026 年 9 月"。没进过货的没有月份 */
+function monthLabel(iso: string | null) {
+  if (!iso) return '还没进过货';
+  const [y, m] = iso.slice(0, 7).split('-');
+  return `${y} 年 ${Number(m)} 月进的`;
+}
+
+function today() {
+  return new Date().toLocaleDateString('sv-SE');
+}
+
 export default function Purchase() {
   const qc = useQueryClient();
-  const [bizDate, setBizDate] = useState(() => new Date().toLocaleDateString('sv-SE'));
+  const [bizDate, setBizDate] = useState(today);
   const [query, setQuery] = useState('');
   const [highlight, setHighlight] = useState(0);
   const [pending, setPending] = useState<Pickable | null>(null);
@@ -60,7 +118,24 @@ export default function Purchase() {
   const [newCosts, setNewCosts] = useState<{ productId: number; avgCost: string }[]>([]);
   /** 刚录完的那单，在最近入库表里标出来 —— 录错的十有八九就是它 */
   const [lastId, setLastId] = useState<number | null>(null);
-  const [undoing, setUndoing] = useState<RecentPurchase | null>(null);
+  const [undoing, setUndoing] = useState<UndoTarget | null>(null);
+  /** 正在看哪个商品的进货记录 */
+  const [intakeOf, setIntakeOf] = useState<{ id: number; name: string } | null>(null);
+  /** 点开的那张进货单 */
+  const [opened, setOpened] = useState<number | null>(null);
+  const [newDate, setNewDate] = useState('');
+  /** 正在拆的那一行。qty 按录入单位填 */
+  const [splitting, setSplitting] = useState<{
+    productId: number;
+    name: string;
+    unitLabel: string;
+    qty: string;
+    date: string;
+    /** 拆的是哪张单 */
+    purchaseId: number;
+  } | null>(null);
+  /** 正在改哪张单的日期 */
+  const [editingDate, setEditingDate] = useState<number | null>(null);
 
   const searchRef = useRef<HTMLInputElement>(null);
   const qtyRef = useRef<HTMLInputElement>(null);
@@ -80,6 +155,18 @@ export default function Purchase() {
   const recent = useQuery({
     queryKey: ['purchasesRecent'],
     queryFn: () => api.get<{ items: RecentPurchase[] }>('/api/purchases'),
+  });
+
+  const intake = useQuery({
+    queryKey: ['productIntake', intakeOf?.id],
+    queryFn: () => api.get<{ items: Intake[] }>(`/api/products/${intakeOf?.id}/intake`),
+    enabled: intakeOf != null,
+  });
+
+  const detail = useQuery({
+    queryKey: ['purchaseDetail', opened],
+    queryFn: () => api.get<PurchaseDetail>(`/api/purchases/${opened}`),
+    enabled: opened != null,
   });
 
   const candidates = query.trim() ? (search.data?.items ?? []) : [];
@@ -102,6 +189,8 @@ export default function Purchase() {
     qc.invalidateQueries({ queryKey: ['frequent'] });
     qc.invalidateQueries({ queryKey: ['stockOverview'] });
     qc.invalidateQueries({ queryKey: ['purchasesRecent'] });
+    qc.invalidateQueries({ queryKey: ['productIntake'] });
+    qc.invalidateQueries({ queryKey: ['purchaseDetail'] });
   }
 
   function backToSearch() {
@@ -187,6 +276,35 @@ export default function Purchase() {
     },
   });
 
+  /** 补录：昨天的货今天才录，日期得能改回去 */
+  const setDate = useMutation({
+    mutationFn: ({ id, date }: { id: number; date: string }) =>
+      api.post<{ from: string; to: string }>(`/api/purchases/${id}/date`, { bizDate: date }),
+    onSuccess: (r) => {
+      setFlash({ tone: 'ok', text: `日期从 ${r.from} 改成了 ${r.to}` });
+      refresh();
+      qc.invalidateQueries({ queryKey: ['purchaseDetail'] });
+    },
+    onError: (e) => setFlash({ tone: 'bad', text: (e as Error).message }),
+  });
+
+  // 拆单：同一个商品分两批进的，录成了一张。
+  // 内部是作废原单 + 建两张新单，所以拆完要关掉这个框 —— 原来那张 id 已经作废了
+  const split = useMutation({
+    mutationFn: ({ id, body }: { id: number; body: unknown }) =>
+      api.post<{ warnings: string[] }>(`/api/purchases/${id}/split`, body),
+    onSuccess: (r) => {
+      setFlash({
+        tone: 'ok',
+        text: r.warnings.length ? `拆开了，但有提醒：${r.warnings[0]}` : '拆成两张单了',
+      });
+      setSplitting(null);
+      setOpened(null);
+      refresh();
+    },
+    onError: (e) => setFlash({ tone: 'bad', text: (e as Error).message }),
+  });
+
   function submit() {
     if (lines.length === 0) {
       setFlash({ tone: 'bad', text: '还没选商品' });
@@ -208,6 +326,9 @@ export default function Purchase() {
     F8: submit,
     Escape: () => {
       if (undoing) setUndoing(null);
+      else if (splitting) setSplitting(null);
+      else if (opened != null) setOpened(null);
+      else if (intakeOf) setIntakeOf(null);
       else if (pending) backToSearch();
       else setLines([]);
     },
@@ -217,16 +338,7 @@ export default function Purchase() {
     <div className="flex min-h-0 grow flex-col gap-5">
       <div className="flex shrink-0 items-center gap-4">
         <h1 className="m-0 text-2xl font-semibold">库存</h1>
-        <span className="grow" />
-        <label className="flex items-center gap-2.5 text-[17px] text-ink-2">
-          业务日期
-          <input
-            type="date"
-            value={bizDate}
-            onChange={(e) => setBizDate(e.target.value)}
-            className="num h-12 w-[200px] rounded-[10px] border border-line bg-card px-4 text-[19px]"
-          />
-        </label>
+        <span className="text-[17px] text-ink-2">按最近进货的月份分组，新的在上面</span>
       </div>
 
       <div className="flex min-h-0 grow gap-5">
@@ -374,7 +486,7 @@ export default function Purchase() {
           {!query.trim() && (
             <div className="mt-5 flex min-h-0 grow flex-col overflow-hidden rounded-xl border border-line">
               <div className="flex h-12 shrink-0 items-center gap-4.5 border-b border-line px-5 text-[16px] text-ink-2">
-                <span className="grow">现有库存　经常补货的排在最前面</span>
+                <span className="grow">现有库存　按进货月份分组，同月里常补的在前</span>
                 <span className="num">{stock.data?.items.length ?? 0} 样</span>
               </div>
 
@@ -384,36 +496,62 @@ export default function Purchase() {
                     还没有商品。先去「商品」页把常卖的那几样弄进来
                   </div>
                 )}
-                {(stock.data?.items ?? []).map((l) => (
-                  <button
-                    key={l.id}
-                    type="button"
-                    onClick={() => pick(l)}
-                    className="flex h-[58px] w-full items-center gap-3.5 border-b border-line px-5 text-left hover:bg-brand-50"
+                {(stock.data?.items ?? []).map((l, i, arr) => {
+                  // 月份变了就插一条分隔。粘在滚动容器顶上 ——
+                  // 翻到列表中间时还得知道正在看哪个月
+                  const month = l.lastIntake?.slice(0, 7) ?? null;
+                  const prev = i > 0 ? (arr[i - 1].lastIntake?.slice(0, 7) ?? null) : undefined;
+                  const newGroup = i === 0 || month !== prev;
+                  return (
+                  <Fragment key={l.id}>
+                  {newGroup && (
+                    <div className="sticky top-0 z-10 flex h-9 items-center border-b border-line bg-page px-5 text-[15px] font-medium text-ink-2">
+                      {monthLabel(l.lastIntake)}
+                    </div>
+                  )}
+                  {/* 一行两个点法：点商品去补货，点「补过几次」翻这批货是哪几次进的。
+                      按钮不能套按钮，所以这里是 div 包两个按钮，不是一整个大按钮 */}
+                  <div
+                    className="flex h-[58px] w-full items-center gap-3.5 border-b border-line px-5"
                   >
-                    <span className="w-[230px] shrink-0 truncate text-[20px]">{l.name}</span>
-                    <span className="num w-[150px] shrink-0 text-[15px] text-ink-2">
-                      {l.pack_unit ? `1 ${l.pack_unit} = ${l.pack_ratio} ${l.base_unit}` : l.base_unit}
-                    </span>
-                    {/* 补货次数摆出来，这张表凭什么这么排就不用猜 */}
-                    <span className="num w-[110px] shrink-0 text-[15px] text-muted">
-                      {l.restockCount > 0 ? `补过 ${l.restockCount} 次` : ''}
-                    </span>
-                    <span className="grow" />
-                    {/* 负库存只提醒不拦路，且不靠颜色单独表意 —— 红字旁边带一句话 */}
-                    {l.negative && <span className="text-[15px] text-danger">卖超了</span>}
-                    <span
-                      className={`num w-[130px] text-right text-[22px] font-medium ${
-                        l.negative ? 'text-danger' : l.qty === '0' ? 'text-muted' : ''
-                      }`}
+                    <button
+                      type="button"
+                      onClick={() => pick(l)}
+                      className="flex h-full grow items-center gap-3.5 text-left hover:bg-brand-50"
                     >
-                      {l.qty} {l.base_unit}
-                    </span>
-                    <span className="num w-[130px] text-right text-[16px] text-ink-2">
-                      成本 ¥{l.avgCost}
-                    </span>
-                  </button>
-                ))}
+                      <span className="w-[230px] shrink-0 truncate text-[20px]">{l.name}</span>
+                      <span className="num w-[150px] shrink-0 text-[15px] text-ink-2">
+                        {l.pack_unit
+                          ? `1 ${l.pack_unit} = ${l.pack_ratio} ${l.base_unit}`
+                          : l.base_unit}
+                      </span>
+                      <span className="grow" />
+                      {/* 负库存只提醒不拦路，且不靠颜色单独表意 —— 红字旁边带一句话 */}
+                      {l.negative && <span className="text-[15px] text-danger">卖超了</span>}
+                      <span
+                        className={`num w-[130px] text-right text-[22px] font-medium ${
+                          l.negative ? 'text-danger' : l.qty === '0' ? 'text-muted' : ''
+                        }`}
+                      >
+                        {l.qty} {l.base_unit}
+                      </span>
+                      <span className="num w-[130px] text-right text-[16px] text-ink-2">
+                        成本 ¥{l.avgCost}
+                      </span>
+                    </button>
+                    {/* 补货次数本来就摆在这儿，点它翻记录是顺手的事 */}
+                    <button
+                      type="button"
+                      onClick={() => setIntakeOf({ id: l.id, name: l.name })}
+                      aria-label={`${l.name} 的进货记录`}
+                      className="num h-11 w-[104px] shrink-0 rounded-[10px] text-[15px] text-muted hover:bg-brand-50 hover:text-brand-900"
+                    >
+                      {l.restockCount > 0 ? `补过 ${l.restockCount} 次` : '进货记录'}
+                    </button>
+                  </div>
+                  </Fragment>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -427,6 +565,37 @@ export default function Purchase() {
                 ¥{formatYuan(totalCents)}
               </span>
             </div>
+            {/* 日期贴着「入库」按钮放：它管的就是这一次入库记在哪天。
+                摆在页面标题栏时离动作最远，而且看着像在筛下面那张库存表 ——
+                设成上个月忘了改回来，接下来几笔全进上个月，还不报错 */}
+            <div className="flex items-center gap-3.5">
+              <label htmlFor="bizDate" className="grow text-[18px] text-ink-2">
+                入库日期
+              </label>
+              <input
+                id="bizDate"
+                type="date"
+                value={bizDate}
+                onChange={(e) => setBizDate(e.target.value)}
+                className={`num h-12 w-[180px] rounded-[10px] border bg-card px-3 text-[19px] ${
+                  bizDate === today() ? 'border-line' : 'border-brand-700 bg-brand-50'
+                }`}
+              />
+            </div>
+            {/* 不是今天就说一句。补录是常态，但「忘了改回来」也是常态 */}
+            {bizDate !== today() && (
+              <div className="flex items-center gap-2.5 text-[16px] text-brand-900">
+                这批货记在 <span className="num">{bizDate}</span>，不是今天
+                <button
+                  type="button"
+                  onClick={() => setBizDate(today())}
+                  className="rounded-[8px] px-2 py-0.5 text-[15px] text-muted underline decoration-dotted underline-offset-4 hover:text-brand-900"
+                >
+                  改回今天
+                </button>
+              </div>
+            )}
+
             <div className="flex items-center gap-3.5">
               <label htmlFor="paid" className="grow text-[18px] text-ink-2">
                 已付
@@ -480,13 +649,19 @@ export default function Purchase() {
                     {p.voided ? (
                       <span className="shrink-0 text-[15px] text-muted">已撤销</span>
                     ) : (
+                      // 改日期、拆单、撤销都在里面。三个按钮挤在这一行，
+                      // 窗口一窄就折成三行
                       <button
                         type="button"
-                        onClick={() => setUndoing(p)}
-                        aria-label={`撤销 ${p.bizDate} 入库的 ${p.summary}`}
-                        className="h-10 shrink-0 rounded-[10px] px-3 text-[16px] text-muted hover:bg-danger-50 hover:text-danger"
+                        onClick={() => {
+                          setNewDate(p.bizDate);
+                          setSplitting(null);
+                          setOpened(p.id);
+                        }}
+                        aria-label={`打开 ${p.bizDate} 入库的 ${p.summary}`}
+                        className="h-10 shrink-0 rounded-[10px] px-3 text-[16px] text-muted hover:bg-brand-50 hover:text-brand-900"
                       >
-                        撤销
+                        改 · 撤
                       </button>
                     )}
                   </div>
@@ -507,6 +682,369 @@ export default function Purchase() {
           </button>
         </Card>
       </div>
+
+      {/* 按商品翻进货记录。改日期和拆单都在这儿点 ——
+          老板想的是「这 4 条中华 2 条六月 2 条七月」，不是「第 31 号单」 */}
+      <Modal
+        open={intakeOf != null}
+        onClose={() => {
+          setIntakeOf(null);
+          setSplitting(null);
+        }}
+        title={`${intakeOf?.name ?? ''}　进货记录`}
+      >
+        <div className="max-h-[420px] overflow-auto rounded-xl border border-line">
+          {(intake.data?.items ?? []).length === 0 && (
+            <div className="px-4 py-5 text-[17px] text-muted">这个商品还没进过货</div>
+          )}
+          {(intake.data?.items ?? []).map((r) => (
+            <div
+              key={r.purchaseId}
+              className={`border-b border-line px-4 py-3 last:border-b-0 ${
+                r.voided ? 'opacity-55' : ''
+              }`}
+            >
+              <div className="flex items-baseline gap-3">
+                <span className="num text-[17px]">{r.bizDate}</span>
+                <span className="num text-[14px] text-muted">{r.time}</span>
+                <span className="grow" />
+                <span className={`num text-[19px] font-medium ${r.voided ? 'line-through' : ''}`}>
+                  ¥{r.amount}
+                </span>
+              </div>
+
+              <div className="mt-1 flex items-center gap-3">
+                <span className="num text-[18px]">
+                  {r.qty} {r.unitLabel}
+                </span>
+                <span className="num text-[14px] text-muted">
+                  成本 ¥{r.unitCost} / {r.baseUnit}
+                </span>
+                <span className="grow" />
+                {r.voided ? (
+                  <span className="text-[15px] text-muted">已撤销</span>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSplitting(null);
+                        setNewDate(r.bizDate);
+                        setEditingDate(r.purchaseId);
+                      }}
+                      className="rounded-[10px] px-2.5 py-1 text-[15px] text-muted hover:bg-brand-50 hover:text-brand-900"
+                    >
+                      改日期
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingDate(null);
+                        setSplitting({
+                          productId: intakeOf!.id,
+                          name: intakeOf!.name,
+                          unitLabel: r.unitLabel,
+                          qty: '',
+                          date: r.bizDate,
+                          purchaseId: r.purchaseId,
+                        });
+                      }}
+                      className="rounded-[10px] px-2.5 py-1 text-[15px] text-muted hover:bg-brand-50 hover:text-brand-900"
+                    >
+                      拆开
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setUndoing({
+                          id: r.purchaseId,
+                          bizDate: r.bizDate,
+                          time: r.time,
+                          summary: `${intakeOf!.name} ${r.qty} ${r.unitLabel}${
+                            r.otherItems > 0 ? `　连同另 ${r.otherItems} 样` : ''
+                          }`,
+                          total: r.amount,
+                        })
+                      }
+                      className="rounded-[10px] px-2.5 py-1 text-[15px] text-muted hover:bg-danger-50 hover:text-danger"
+                    >
+                      撤销
+                    </button>
+                  </>
+                )}
+              </div>
+
+              {/* 这张单里还有别的商品：撤销会把那些一起撤掉，不说清楚就是坑 */}
+              {!r.voided && r.otherItems > 0 && (
+                <div className="mt-1 text-[14px] text-muted">
+                  这张单里还有 {r.otherItems} 样别的商品，撤销会一起撤掉
+                </div>
+              )}
+
+              {editingDate === r.purchaseId && (
+                <div className="mt-3 flex items-end gap-3 rounded-[10px] bg-page px-4 py-3">
+                  <label className="flex flex-col gap-1.5 text-[15px] text-ink-2">
+                    改到哪天
+                    <input
+                      type="date"
+                      autoFocus
+                      value={newDate}
+                      onChange={(e) => setNewDate(e.target.value)}
+                      aria-label="改到哪天"
+                      className="num h-12 w-[180px] rounded-[10px] border border-line bg-card px-3 text-[17px]"
+                    />
+                  </label>
+                  <span className="grow" />
+                  <button
+                    type="button"
+                    onClick={() => setEditingDate(null)}
+                    className="h-12 rounded-[10px] border border-line bg-card px-4 text-[16px]"
+                  >
+                    取消
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setDate.mutate({ id: r.purchaseId, date: newDate }, { onSuccess: () => setEditingDate(null) })
+                    }
+                    disabled={setDate.isPending || newDate === r.bizDate}
+                    className="h-12 rounded-[10px] bg-brand-700 px-5 text-[16px] font-semibold text-white disabled:opacity-50"
+                  >
+                    改
+                  </button>
+                </div>
+              )}
+
+              {splitting?.purchaseId === r.purchaseId && (
+                <div className="mt-3 flex flex-wrap items-end gap-3 rounded-[10px] bg-page px-4 py-3">
+                  <label className="flex flex-col gap-1.5 text-[15px] text-ink-2">
+                    挪走多少
+                    <div className="flex items-center gap-2">
+                      <input
+                        autoFocus
+                        value={splitting.qty}
+                        onChange={(e) => setSplitting((v) => v && { ...v, qty: e.target.value })}
+                        aria-label="挪走多少"
+                        placeholder="2"
+                        className="num h-12 w-20 rounded-[10px] border border-line bg-card px-3 text-[18px]"
+                      />
+                      <span className="text-[17px] text-ink-2">{r.unitLabel}</span>
+                    </div>
+                  </label>
+                  <label className="flex flex-col gap-1.5 text-[15px] text-ink-2">
+                    挪到哪天
+                    <input
+                      type="date"
+                      value={splitting.date}
+                      onChange={(e) => setSplitting((v) => v && { ...v, date: e.target.value })}
+                      aria-label="挪到哪天"
+                      className="num h-12 w-[180px] rounded-[10px] border border-line bg-card px-3 text-[17px]"
+                    />
+                  </label>
+                  <span className="grow" />
+                  <button
+                    type="button"
+                    onClick={() => setSplitting(null)}
+                    className="h-12 rounded-[10px] border border-line bg-card px-4 text-[16px]"
+                  >
+                    取消
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      split.mutate({
+                        id: r.purchaseId,
+                        body: {
+                          productId: splitting.productId,
+                          qty: splitting.qty.trim(),
+                          bizDate: splitting.date,
+                        },
+                      })
+                    }
+                    disabled={split.isPending || !splitting.qty.trim()}
+                    className="h-12 rounded-[10px] bg-brand-700 px-5 text-[16px] font-semibold text-white disabled:opacity-50"
+                  >
+                    拆开
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-4 text-[15px] leading-relaxed text-muted">
+          拆开会把那张单换成两张：留在原日期的一张，挪到新日期的一张。
+          货和进价都不变，只是分成了两笔账。
+        </div>
+
+        <div className="mt-5 flex justify-end">
+          <button
+            type="button"
+            onClick={() => {
+              setIntakeOf(null);
+              setSplitting(null);
+            }}
+            className="flex h-13 items-center gap-2.5 rounded-[10px] border border-line bg-card px-5 text-[18px]"
+          >
+            <span className="num text-[13px] font-medium text-muted">Esc</span>
+            关掉
+          </button>
+        </div>
+      </Modal>
+
+      {/* 一张进货单能做的三件事都在这儿：改日期、拆一部分到别的日期、整张撤销 */}
+      <Modal open={opened != null} onClose={() => setOpened(null)} title="这张进货单">
+        {detail.data && (
+          <>
+            <div className="mb-4 flex items-baseline gap-3">
+              <span className="num text-[15px] text-muted">录于 {detail.data.time}</span>
+              <span className="grow" />
+              <span className="num text-[24px] font-semibold">¥{detail.data.total}</span>
+            </div>
+
+            {/* 补录是常态：昨天的货今天才录，日期得能改回去 */}
+            <div className="mb-5 flex items-end gap-3">
+              <label className="flex flex-col gap-1.5 text-[16px] text-ink-2">
+                业务日期
+                <input
+                  type="date"
+                  value={newDate}
+                  onChange={(e) => setNewDate(e.target.value)}
+                  aria-label="业务日期"
+                  className="num h-13 w-[190px] rounded-[10px] border border-line bg-card px-3 text-[19px]"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => setDate.mutate({ id: detail.data.id, date: newDate })}
+                disabled={setDate.isPending || newDate === detail.data.bizDate}
+                className="h-13 rounded-[10px] border border-line bg-card px-5 text-[17px] disabled:opacity-40"
+              >
+                改到这天
+              </button>
+            </div>
+
+            <div className="overflow-hidden rounded-xl border border-line">
+              {detail.data.items.map((it) => (
+                <div key={it.productId} className="border-b border-line px-4 py-3 last:border-b-0">
+                  <div className="flex items-baseline gap-3">
+                    <span className="grow truncate text-[19px]">{it.name}</span>
+                    <span className="num text-[17px] text-ink-2">
+                      {it.qty} {it.unitLabel}
+                    </span>
+                    <span className="num w-24 text-right text-[18px]">¥{it.amount}</span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setSplitting({
+                          productId: it.productId,
+                          name: it.name,
+                          unitLabel: it.unitLabel,
+                          qty: '',
+                          date: bizDate,
+                          purchaseId: detail.data.id,
+                        })
+                      }
+                      className="shrink-0 rounded-[10px] px-2.5 py-1 text-[15px] text-muted hover:bg-brand-50 hover:text-brand-900"
+                    >
+                      拆一部分
+                    </button>
+                  </div>
+                  <div className="num text-[14px] text-muted">
+                    成本 ¥{it.unitCost} / {it.baseUnit}
+                  </div>
+
+                  {splitting?.productId === it.productId && (
+                    <div className="mt-3 flex flex-wrap items-end gap-3 rounded-[10px] bg-page px-4 py-3">
+                      <label className="flex flex-col gap-1.5 text-[15px] text-ink-2">
+                        挪走多少
+                        <div className="flex items-center gap-2">
+                          <input
+                            autoFocus
+                            value={splitting.qty}
+                            onChange={(e) =>
+                              setSplitting((v) => v && { ...v, qty: e.target.value })
+                            }
+                            aria-label="挪走多少"
+                            placeholder="2"
+                            className="num h-12 w-20 rounded-[10px] border border-line bg-card px-3 text-[18px]"
+                          />
+                          <span className="text-[17px] text-ink-2">{it.unitLabel}</span>
+                        </div>
+                      </label>
+                      <label className="flex flex-col gap-1.5 text-[15px] text-ink-2">
+                        挪到哪天
+                        <input
+                          type="date"
+                          value={splitting.date}
+                          onChange={(e) =>
+                            setSplitting((v) => v && { ...v, date: e.target.value })
+                          }
+                          aria-label="挪到哪天"
+                          className="num h-12 w-[180px] rounded-[10px] border border-line bg-card px-3 text-[17px]"
+                        />
+                      </label>
+                      <span className="grow" />
+                      <button
+                        type="button"
+                        onClick={() => setSplitting(null)}
+                        className="h-12 rounded-[10px] border border-line bg-card px-4 text-[16px]"
+                      >
+                        取消
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          split.mutate({
+                            id: detail.data.id,
+                            body: {
+                              productId: splitting.productId,
+                              qty: splitting.qty.trim(),
+                              bizDate: splitting.date,
+                            },
+                          })
+                        }
+                        disabled={split.isPending || !splitting.qty.trim()}
+                        className="h-12 rounded-[10px] bg-brand-700 px-5 text-[16px] font-semibold text-white disabled:opacity-50"
+                      >
+                        拆开
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-4 text-[15px] leading-relaxed text-muted">
+              拆单会把这张单换成两张：留在原日期的一张，和挪到新日期的一张。
+              货和进价都不变，只是分成了两笔账。
+            </div>
+
+            <div className="mt-6 flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  const row = recent.data?.items.find((x) => x.id === opened);
+                  setOpened(null);
+                  if (row) setUndoing(row);
+                }}
+                className="h-13 rounded-[10px] px-4 text-[17px] text-muted hover:bg-danger-50 hover:text-danger"
+              >
+                撤销这次入库
+              </button>
+              <span className="grow" />
+              <button
+                type="button"
+                onClick={() => setOpened(null)}
+                className="flex h-13 items-center gap-2.5 rounded-[10px] border border-line bg-card px-5 text-[18px]"
+              >
+                <span className="num text-[13px] font-medium text-muted">Esc</span>
+                关掉
+              </button>
+            </div>
+          </>
+        )}
+      </Modal>
 
       {/* 撤销要确认：它动的是库存和成本，不像删一行那样能再点一下加回来 */}
       <Modal open={!!undoing} onClose={() => setUndoing(null)} title="撤销这次入库？">

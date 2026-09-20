@@ -113,6 +113,7 @@ mod ledger;
 mod onboarding;
 mod pricing;
 mod products;
+mod redate;
 mod reports;
 mod service_fees;
 mod statements;

@@ -53,9 +53,13 @@ function priceOf(p: Product, unit: Unit): string {
   return cents == null ? '' : centsToYuan(cents);
 }
 
+function today() {
+  return new Date().toLocaleDateString('sv-SE');
+}
+
 export default function Sell() {
   const qc = useQueryClient();
-  const [bizDate, setBizDate] = useState(() => new Date().toLocaleDateString('sv-SE'));
+  const [bizDate, setBizDate] = useState(today);
   const [query, setQuery] = useState('');
   const [highlight, setHighlight] = useState(0);
   const [pending, setPending] = useState<Product | null>(null);
@@ -374,16 +378,6 @@ export default function Sell() {
 
       <div className="flex shrink-0 items-center gap-4">
         <h1 className="m-0 text-2xl font-semibold">卖货</h1>
-        <span className="grow" />
-        <label className="flex items-center gap-2.5 text-[17px] text-ink-2">
-          业务日期
-          <input
-            type="date"
-            value={bizDate}
-            onChange={(e) => setBizDate(e.target.value)}
-            className="num h-12 w-[200px] rounded-[10px] border border-line bg-card px-4 text-[19px]"
-          />
-        </label>
       </div>
 
       <div className="flex min-h-0 grow gap-5">
@@ -629,6 +623,37 @@ export default function Sell() {
                 ¥{formatYuan(totalCents)}
               </span>
             </div>
+
+            {/* 日期贴着结账按钮放：它管的就是这一单记在哪天。
+                摆在页面标题栏时离动作最远，设成上个月忘了改回来，
+                接下来几单全进上个月，还不报错 */}
+            <div className="flex items-center gap-3.5">
+              <label htmlFor="bizDate" className="grow text-[18px] text-ink-2">
+                记在哪天
+              </label>
+              <input
+                id="bizDate"
+                type="date"
+                value={bizDate}
+                onChange={(e) => setBizDate(e.target.value)}
+                className={`num h-12 w-[180px] rounded-[10px] border bg-card px-3 text-[19px] ${
+                  bizDate === today() ? 'border-line' : 'border-brand-700 bg-brand-50'
+                }`}
+              />
+            </div>
+            {/* 不是今天就说一句。补录是常态，但「忘了改回来」也是常态 */}
+            {bizDate !== today() && (
+              <div className="flex items-center gap-2.5 text-[16px] text-brand-900">
+                这单记在 <span className="num">{bizDate}</span>，不是今天
+                <button
+                  type="button"
+                  onClick={() => setBizDate(today())}
+                  className="rounded-[8px] px-2 py-0.5 text-[15px] text-muted underline decoration-dotted underline-offset-4 hover:text-brand-900"
+                >
+                  改回今天
+                </button>
+              </div>
+            )}
           </div>
 
           <Flash value={flash} className="mt-4" />

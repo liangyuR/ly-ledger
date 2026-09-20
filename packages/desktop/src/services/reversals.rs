@@ -15,7 +15,9 @@ use serde::Deserialize;
 
 use crate::error::Result;
 use crate::money::{div_round, qty_to_milli, Decimalish};
-use crate::services::inventory::{record_movement, MovementInput, MovementType, ReverseOf};
+use crate::services::inventory::{
+    line_cost_cents, record_movement, MovementInput, MovementType, ReverseOf,
+};
 use crate::services::purchases::{receive, ReceiveInput, ReceiveResult, Unit};
 use crate::services::rebuild_allocations::rebuild_allocations;
 use crate::services::sales::{checkout, CheckoutInput, CheckoutOptions, CheckoutResult};
@@ -537,6 +539,258 @@ pub fn revise_purchase(
     Ok(RevisePurchaseResult {
         created,
         voided_purchase_id: purchase_id,
+    })
+}
+
+// ─────────────────────────── 拆进货单 ───────────────────────────
+
+/// 拆单：同一个商品分两批进的，录成了一张。
+///
+/// 「4 条烟，2 条是 6 月进的、2 条是 7 月进的」—— 录的时候图快写了一张 4 条的单，
+/// 月底对账才想起来。直接改原单日期只能整张挪，两个月的进货额还是错的。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SplitInput {
+    pub product_id: i64,
+    /// 分出去多少，**按原单的录入单位**：原单录的是「条」，这里也写条
+    pub qty: Decimalish,
+    /// 分出去那部分记在哪天
+    pub biz_date: String,
+}
+
+pub struct SplitResult {
+    /// 留在原日期的那张
+    pub kept_purchase_id: i64,
+    /// 挪到新日期的那张
+    pub moved_purchase_id: i64,
+    pub voided_purchase_id: i64,
+    pub warnings: Vec<String>,
+}
+
+/// 一行进货明细的原始数值。**照抄原单的成本快照**，不重算 ——
+/// 拆单只是把一张单分成两张，进价是当初谈好的那个，不该因为拆一下就变
+struct RawLine {
+    product_id: i64,
+    unit: String,
+    qty_milli: i64,
+    qty_base_milli: i64,
+    unit_cost_base_e4: i64,
+    amount_cents: i64,
+}
+
+/// 建一张进货单：单头、明细、库存流水一次写完。
+///
+/// 不走 `purchases::receive`：它收的是「按录入单位的进价」，而我们手上是
+/// 按基础单位的成本快照（e4）。换算回去再让它除一次，除不尽的那几厘就丢了 ——
+/// 拆完两张单的成本加起来会对不上原来那一张。
+fn insert_purchase_raw(
+    conn: &Connection,
+    biz_date: &str,
+    supplier_id: Option<i64>,
+    paid_cents: i64,
+    note: &str,
+    lines: &[RawLine],
+    revision_of: i64,
+) -> Result<(i64, Vec<String>)> {
+    let total_cents: i64 = lines.iter().map(|l| l.amount_cents).sum();
+
+    conn.execute(
+        "INSERT INTO purchases (biz_date, supplier_id, total_amount_cents, paid_amount_cents,
+                                note, revision_of_purchase_id,
+                                rev)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, (SELECT rev + 1 FROM purchases WHERE id = ?6))",
+        params![biz_date, supplier_id, total_cents, paid_cents, note, revision_of],
+    )?;
+    let purchase_id = conn.last_insert_rowid();
+
+    let mut warnings = Vec::new();
+    for l in lines {
+        conn.execute(
+            "INSERT INTO purchase_items
+               (purchase_id, product_id, unit, qty_milli, qty_base_milli,
+                unit_cost_base_e4, amount_cents)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                purchase_id,
+                l.product_id,
+                l.unit,
+                l.qty_milli,
+                l.qty_base_milli,
+                l.unit_cost_base_e4,
+                l.amount_cents,
+            ],
+        )?;
+
+        let after = record_movement(
+            conn,
+            MovementInput {
+                biz_date,
+                product_id: l.product_id,
+                kind: MovementType::Purchase,
+                qty_base_milli: l.qty_base_milli,
+                unit_cost_e4: l.unit_cost_base_e4,
+                ref_type: "purchase",
+                ref_id: purchase_id,
+                reverse_of: None,
+            },
+        )?;
+        warnings.extend(after.warnings.into_iter().map(|w| w.message));
+    }
+
+    Ok((purchase_id, warnings))
+}
+
+/// 把一张进货单里某个商品的一部分数量挪到另一天。
+///
+/// 内部是**作废原单 + 建两张新单**：一张留在原日期（含其余商品），
+/// 一张只装挪出去的那部分。跟改单同一套规矩 —— 已提交单据的数量不原地改
+/// （红线 6），而且两张新单的成本快照照抄原单，拆一下不该改变进价。
+///
+/// 调用方负责开事务：三步必须同生共死，中间断了会多出半张单和一堆库存流水。
+pub fn split_purchase(
+    conn: &Connection,
+    purchase_id: i64,
+    input: &SplitInput,
+) -> Result<SplitResult> {
+    check_biz_date(&input.biz_date)?;
+
+    let header = conn
+        .query_row(
+            "SELECT biz_date, supplier_id, paid_amount_cents, note, voided_at
+               FROM purchases WHERE id = ?1",
+            [purchase_id],
+            |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, Option<i64>>(1)?,
+                    r.get::<_, i64>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, Option<String>>(4)?,
+                ))
+            },
+        )
+        .optional()?;
+
+    let Some((biz_date, supplier_id, paid_cents, note, voided_at)) = header else {
+        bail!("进货单不存在：{purchase_id}");
+    };
+    if voided_at.is_some() {
+        bail!("这张进货单已经撤销了，没什么可拆的");
+    }
+
+    let items: Vec<RawLine> = {
+        let mut stmt = conn.prepare(
+            "SELECT product_id, unit, qty_milli, qty_base_milli, unit_cost_base_e4, amount_cents
+               FROM purchase_items WHERE purchase_id = ?1 ORDER BY id",
+        )?;
+        let rows = stmt.query_map([purchase_id], |r| {
+            Ok(RawLine {
+                product_id: r.get(0)?,
+                unit: r.get(1)?,
+                qty_milli: r.get(2)?,
+                qty_base_milli: r.get(3)?,
+                unit_cost_base_e4: r.get(4)?,
+                amount_cents: r.get(5)?,
+            })
+        })?;
+        rows.collect::<rusqlite::Result<_>>()?
+    };
+
+    let Some(target) = items.iter().position(|l| l.product_id == input.product_id) else {
+        bail!("这张单里没有这个商品：{}", input.product_id);
+    };
+
+    let move_qty_milli = qty_to_milli(&input.qty)?;
+    ensure!(move_qty_milli > 0, "要挪出去的数量必须为正");
+    let src = &items[target];
+    if move_qty_milli >= src.qty_milli {
+        bail!(
+            "要挪的数量不能是全部 —— 整张单换个日期，直接改这张单的日期就行，不用拆"
+        );
+    }
+
+    // 按录入单位的比例折算成基础单位。**整数运算**：先转浮点再乘，
+    // 拆「1/3 条」这类情形下两张单的数量加起来会跟原来差一点点
+    let move_base_milli = div_round(
+        move_qty_milli as i128 * src.qty_base_milli as i128,
+        src.qty_milli as i128,
+    )?;
+    // 留下的那份用减法得出，不是第二次折算 —— 两次折算各自舍入，合起来就不等于原数
+    let kept_base_milli = src.qty_base_milli - move_base_milli;
+    ensure!(kept_base_milli > 0, "挪出去之后原单这一行就空了，那是整张改期");
+
+    let moved_line = RawLine {
+        product_id: src.product_id,
+        unit: src.unit.clone(),
+        qty_milli: move_qty_milli,
+        qty_base_milli: move_base_milli,
+        unit_cost_base_e4: src.unit_cost_base_e4,
+        amount_cents: line_cost_cents(move_base_milli, src.unit_cost_base_e4)?,
+    };
+
+    let mut kept_lines = Vec::with_capacity(items.len());
+    for (i, l) in items.iter().enumerate() {
+        if i == target {
+            kept_lines.push(RawLine {
+                product_id: l.product_id,
+                unit: l.unit.clone(),
+                qty_milli: l.qty_milli - move_qty_milli,
+                qty_base_milli: kept_base_milli,
+                unit_cost_base_e4: l.unit_cost_base_e4,
+                amount_cents: line_cost_cents(kept_base_milli, l.unit_cost_base_e4)?,
+            });
+        } else {
+            kept_lines.push(RawLine {
+                product_id: l.product_id,
+                unit: l.unit.clone(),
+                qty_milli: l.qty_milli,
+                qty_base_milli: l.qty_base_milli,
+                unit_cost_base_e4: l.unit_cost_base_e4,
+                amount_cents: l.amount_cents,
+            });
+        }
+    }
+
+    // 先整张撤掉，再把两张建回去。撤销会把全部商品的库存扣回来，
+    // 下面两张单再各自加回去 —— 净效果就是那一行被拆成了两条流水
+    let voided = void_purchase(conn, purchase_id, VoidReason::Revised)?;
+    let mut warnings = voided.warnings;
+
+    // 已付金额整笔留在原日期那张：它一期只记录、不参与任何计算，
+    // 按比例摊到两张单上只会让「这张单付了多少」看着更莫名其妙
+    let (kept_id, w1) = insert_purchase_raw(
+        conn,
+        &biz_date,
+        supplier_id,
+        paid_cents,
+        &note,
+        &kept_lines,
+        purchase_id,
+    )?;
+    let (moved_id, w2) = insert_purchase_raw(
+        conn,
+        &input.biz_date,
+        supplier_id,
+        0,
+        &note,
+        &[moved_line],
+        purchase_id,
+    )?;
+    warnings.extend(w1);
+    warnings.extend(w2);
+
+    // 修订链只有一根 superseded 指针，拆单却生出两张后继。
+    // 指向留在原地的那张：它是原单的主体，另一张靠 revision_of 也回得来
+    conn.execute(
+        "UPDATE purchases SET superseded_by_purchase_id = ?1 WHERE id = ?2",
+        params![kept_id, purchase_id],
+    )?;
+
+    Ok(SplitResult {
+        kept_purchase_id: kept_id,
+        moved_purchase_id: moved_id,
+        voided_purchase_id: purchase_id,
+        warnings,
     })
 }
 

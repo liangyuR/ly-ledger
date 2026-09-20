@@ -63,6 +63,8 @@ fn main() {
             commands::sale_detail,
             commands::sales_by_date,
             commands::purchases_recent,
+            commands::purchase_detail,
+            commands::product_intake,
             // 服务型收费（桌子费）
             commands::service_fees_list,
             commands::service_fees_day,
@@ -72,6 +74,10 @@ fn main() {
             commands::sale_return,
             commands::purchase_void,
             commands::purchase_revise,
+            commands::purchase_split,
+            // 改业务日期：补录是常态（红线 2）
+            commands::sale_set_date,
+            commands::purchase_set_date,
             commands::payment_void,
             commands::customer_rebuild_allocations,
             // 欠款

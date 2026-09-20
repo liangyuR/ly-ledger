@@ -13,6 +13,7 @@ pub mod products;
 pub mod profit_reports;
 pub mod purchases;
 pub mod rebuild_allocations;
+pub mod redate;
 pub mod reports;
 pub mod reversals;
 pub mod sale_detail;

@@ -50,6 +50,7 @@ function route(method: Method, path: string, body?: unknown): [string, Args] {
       if (method === 'GET' && !second) return ['products_list', { q: query.get('q') ?? undefined }];
       if (method === 'GET' && second === 'frequent') return ['products_frequent', {}];
       if (method === 'GET' && third === 'stock') return ['product_stock', { productId: id }];
+      if (method === 'GET' && third === 'intake') return ['product_intake', { productId: id }];
       if (method === 'POST' && !second) return ['product_create', { input: b }];
       if (method === 'POST' && second === 'parse-import') return ['products_parse_import', b];
       if (method === 'POST' && second === 'import') return ['products_import', b];
@@ -90,13 +91,17 @@ function route(method: Method, path: string, body?: unknown): [string, Args] {
       if (method === 'POST' && third === 'void') return ['sale_void', { id }];
       if (method === 'POST' && third === 'revise') return ['sale_revise', { id, input: b }];
       if (method === 'POST' && third === 'return') return ['sale_return', { id, input: b }];
+      if (method === 'POST' && third === 'date') return ['sale_set_date', { id, ...b }];
       break;
 
     case 'purchases':
       if (method === 'GET' && !second) return ['purchases_recent', {}];
+      if (method === 'GET') return ['purchase_detail', { id }];
       if (method === 'POST' && second === 'receive') return ['purchases_receive', { input: b }];
       if (method === 'POST' && third === 'void') return ['purchase_void', { id }];
       if (method === 'POST' && third === 'revise') return ['purchase_revise', { id, input: b }];
+      if (method === 'POST' && third === 'date') return ['purchase_set_date', { id, ...b }];
+      if (method === 'POST' && third === 'split') return ['purchase_split', { id, input: b }];
       break;
 
     case 'payments':
@@ -229,8 +234,11 @@ export interface DebtInfo {
 
 export const endpoints = {
   health: () => api.get<{ ok: boolean; sqlite: string; tables: number }>('/health'),
+  /** total 是**全部**商品数，不跟着搜索变 —— 底下那句「共 N 个商品」要用它 */
   products: (q?: string) =>
-    api.get<{ items: Product[] }>(`/api/products${q ? `?q=${encodeURIComponent(q)}` : ''}`),
+    api.get<{ items: Product[]; total: number }>(
+      `/api/products${q ? `?q=${encodeURIComponent(q)}` : ''}`,
+    ),
   stock: (productId: number) => api.get<StockInfo>(`/api/products/${productId}/stock`),
   checkout: (body: unknown) => api.post<CheckoutResponse>('/api/sales/checkout', body),
   receive: (body: unknown) => api.post<{ purchaseId: number; total: string }>('/api/purchases/receive', body),

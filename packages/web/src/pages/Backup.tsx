@@ -13,7 +13,8 @@ interface BackupStatus {
   count: number;
   /** 备份文件放在哪个目录。出事那天要照着它去资源管理器里找文件 */
   dir: string;
-  files: { name: string; sizeBytes: number }[];
+  /** 后端总会给这个数组，但少一层保护就是一次白屏 —— 崩在备份页尤其糟 */
+  files?: { name: string; sizeBytes: number }[];
 }
 
 const mb = (b: number) => `${(b / 1048576).toFixed(1)} MB`;
@@ -143,10 +144,10 @@ export default function Backup() {
           </div>
 
           <div className="min-h-0 grow overflow-auto">
-            {(s?.files.length ?? 0) === 0 && (
+            {(s?.files?.length ?? 0) === 0 && (
               <div className="pt-4 text-[17px] text-muted">还没有备份文件</div>
             )}
-            {s?.files.map((f) => (
+            {s?.files?.map((f) => (
               <div key={f.name} className="flex h-14 items-center gap-4 border-t border-line">
                 <span className="num grow text-[19px]">{f.name}</span>
                 <span className="num text-[17px] text-ink-2">{mb(f.sizeBytes)}</span>

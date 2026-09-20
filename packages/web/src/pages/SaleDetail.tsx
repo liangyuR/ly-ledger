@@ -85,6 +85,9 @@ export default function SaleDetail() {
   const [returnQty, setReturnQty] = useState<Record<number, string>>({});
   const [addQuery, setAddQuery] = useState('');
   const [flash, setFlash] = useState<{ tone: 'ok' | 'bad'; text: string } | null>(null);
+  /** 正在改业务日期 */
+  const [redating, setRedating] = useState(false);
+  const [newDate, setNewDate] = useState('');
 
   const detail = useQuery({
     queryKey: ['sale', saleId],
@@ -132,6 +135,20 @@ export default function SaleDetail() {
       return 0;
     }
   })();
+
+  // 改业务日期。挂账单改了日期就换了 FIFO 里的位置，后端会连带重算核销和账龄
+  const setDate = useMutation({
+    mutationFn: (date: string) =>
+      api.post<{ from: string; to: string }>(`/api/sales/${saleId}/date`, { bizDate: date }),
+    onSuccess: (r) => {
+      setRedating(false);
+      setFlash({ tone: 'ok', text: `日期从 ${r.from} 改成了 ${r.to}` });
+      qc.invalidateQueries({ queryKey: ['sale', saleId] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+      qc.invalidateQueries({ queryKey: ['debts'] });
+    },
+    onError: (e) => setFlash({ tone: 'bad', text: (e as Error).message }),
+  });
 
   const revise = useMutation({
     mutationFn: () =>
@@ -202,7 +219,51 @@ export default function SaleDetail() {
         </button>
         <h1 className="m-0 text-2xl font-semibold">单据详情</h1>
         <span className="num text-[17px] text-ink-2">
-          #{d.id}　{d.bizDate}　{d.settleType === 'cash' ? '现金' : `挂账 · ${d.customerName ?? ''}`}
+          #{d.id}
+          {/* 补录是常态：昨天的生意今天才录，日期得能改回去（红线 2）。
+              作废的单不给改 —— 后端也会拒 */}
+          {d.voidedAt ? (
+            d.bizDate
+          ) : redating ? (
+            <>
+              <input
+                type="date"
+                autoFocus
+                value={newDate}
+                onChange={(e) => setNewDate(e.target.value)}
+                aria-label="业务日期"
+                className="num h-10 w-[170px] rounded-[10px] border border-line bg-card px-2.5 text-[17px]"
+              />
+              <button
+                type="button"
+                onClick={() => setDate.mutate(newDate)}
+                disabled={setDate.isPending || newDate === d.bizDate}
+                className="ml-2 h-10 rounded-[10px] bg-brand-700 px-3.5 text-[16px] font-semibold text-white disabled:opacity-40"
+              >
+                改到这天
+              </button>
+              <button
+                type="button"
+                onClick={() => setRedating(false)}
+                className="ml-1.5 h-10 rounded-[10px] px-3 text-[16px] text-muted"
+              >
+                取消
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                setNewDate(d.bizDate);
+                setRedating(true);
+              }}
+              title="改业务日期"
+              className="rounded-[8px] px-1.5 underline decoration-dotted underline-offset-4 hover:bg-brand-50 hover:text-brand-900"
+            >
+              {d.bizDate}
+            </button>
+          )}
+          　{d.settleType === 'cash' ? '现金' : `挂账 · ${d.customerName ?? ''}`}
           {d.rev > 1 && `　第 ${d.rev} 版`}
         </span>
         <span className="grow" />

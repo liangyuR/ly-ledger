@@ -180,19 +180,25 @@ pub struct StockLine {
     pub qty_milli: i64,
     #[serde(skip)]
     pub avg_cost_e4: i64,
-    /// 近 90 天补过几次货，列表就按它排
+    /// 近 90 天补过几次货
     #[serde(rename = "restockCount")]
     pub restock_count: i64,
+    /// 最近一次进货的业务日期。列表按它的月份分组，没进过货的排最后
+    #[serde(rename = "lastIntake")]
+    pub last_intake: Option<String>,
 }
 
-/// 按「经常补货的在最前面」排。
+/// 按**最近进货的月份**分组，新的月份在上面；同一个月里仍按补货频次排。
 ///
-/// 补货频次而不是销量 —— 这张表是站在货架前用的，老板要看的是
-/// 「我每周都要补的那几样现在还剩多少」，卖得多但进得少的东西排在前面没用。
+/// 分组的理由是老板找货是按批次找的：「6 月进的那批茶还剩多少」。
+/// 月份之内还按补货频次 —— 这张表是站在货架前用的，每周都要补的那几样
+/// 该在同月里排前面，卖得多但进得少的东西排前面没用。
 ///
-/// 没有结存行就是零库存零成本，不是「查不到」；新店一次货都没进过时
-/// 频次全是 0，自然退回建档顺序 —— 空列表比排错更糟。
-pub fn stock_overview(conn: &Connection, limit: i64) -> Result<Vec<StockLine>> {
+/// 没有结存行就是零库存零成本，不是「查不到」；一次货都没进过的商品
+/// 没有月份可归，排在最后 —— 空列表比排错更糟。
+///
+/// **不截断。** 底下那句「共 N 样」数的就是这张表，截断了数字就跟着骗人。
+pub fn stock_overview(conn: &Connection) -> Result<Vec<StockLine>> {
     let day = crate::services::reports::today(conn)?;
     let mut stmt = conn.prepare(
         "SELECT p.id, p.name, p.base_unit, p.pack_unit, p.pack_ratio,
@@ -201,7 +207,13 @@ pub fn stock_overview(conn: &Connection, limit: i64) -> Result<Vec<StockLine>> {
                 COALESCE(i.avg_cost_base_e4, 0) AS avg_cost_e4,
                 -- 数 pu 不数 pi：作废的单和 90 天以前的单在这个 JOIN 上匹配不到，
                 -- 数 pi 会把它们一起算进来，排序就成了「历史上进得多」
-                COUNT(pu.id) AS restock_count
+                COUNT(pu.id) AS restock_count,
+                -- 最近一次进的是哪天。不受 90 天窗口限制 ——
+                -- 去年进的货今天还在货架上，它照样得有个月份可归
+                (SELECT MAX(pu2.biz_date)
+                   FROM purchase_items pi2
+                   JOIN purchases pu2 ON pu2.id = pi2.purchase_id AND pu2.voided_at IS NULL
+                  WHERE pi2.product_id = p.id) AS last_intake
            FROM products p
            LEFT JOIN inventory i      ON i.product_id  = p.id
            LEFT JOIN purchase_items pi ON pi.product_id = p.id
@@ -211,10 +223,11 @@ pub fn stock_overview(conn: &Connection, limit: i64) -> Result<Vec<StockLine>> {
           -- 服务型收费（桌子费）不进这张表：它没有库存，列出来就是一行永远为 0
           WHERE p.is_active = 1 AND p.is_service = 0
           GROUP BY p.id
-          ORDER BY restock_count DESC, p.sort_weight DESC, p.id
-          LIMIT ?2",
+          -- SQLite 没有 NULLS LAST，用一个布尔列顶上：没进过货的排到最后
+          ORDER BY last_intake IS NULL, last_intake DESC,
+                   restock_count DESC, p.sort_weight DESC, p.id",
     )?;
-    let rows = stmt.query_map(params![day, limit], |r| {
+    let rows = stmt.query_map(params![day], |r| {
         Ok(StockLine {
             id: r.get(0)?,
             name: r.get(1)?,
@@ -226,6 +239,7 @@ pub fn stock_overview(conn: &Connection, limit: i64) -> Result<Vec<StockLine>> {
             qty_milli: r.get(7)?,
             avg_cost_e4: r.get(8)?,
             restock_count: r.get(9)?,
+            last_intake: r.get(10)?,
         })
     })?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)

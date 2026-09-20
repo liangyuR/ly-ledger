@@ -116,7 +116,7 @@ fn 桌子费不出现在库存表和常用商品里() {
         "INSERT INTO products (name, category, base_unit) VALUES ('中华', 'cigarette', '盒')",
     );
 
-    let names: Vec<String> = stock_overview(&conn, 200).unwrap().into_iter().map(|r| r.name).collect();
+    let names: Vec<String> = stock_overview(&conn).unwrap().into_iter().map(|r| r.name).collect();
     assert_eq!(names, vec!["中华"], "库存页只摆有库存概念的东西");
 
     let frequent = crate::services::reports::frequent_products(&conn, 9).unwrap();

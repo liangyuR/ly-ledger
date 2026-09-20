@@ -272,3 +272,156 @@ pub fn recent(conn: &Connection, limit: i64) -> Result<Vec<PurchaseListRow>> {
     }
     Ok(out)
 }
+
+// ─────────────────────────── 单张进货单 ───────────────────────────
+
+/// 明细里的一行，给「这张进货单」那个框用。
+pub struct PurchaseLine {
+    pub product_id: i64,
+    pub name: String,
+    /// 按**录入单位**的数量和单位名：他录的是 3 条，这里就是 3 条
+    pub qty_milli: i64,
+    pub unit_label: String,
+    pub unit_cost_base_e4: i64,
+    pub base_unit: String,
+    pub amount_cents: i64,
+}
+
+pub struct PurchaseDetail {
+    pub id: i64,
+    pub biz_date: String,
+    pub created_at: String,
+    pub total_cents: i64,
+    pub paid_cents: i64,
+    pub note: String,
+    pub voided: bool,
+    pub items: Vec<PurchaseLine>,
+}
+
+pub fn detail(conn: &Connection, id: i64) -> Result<PurchaseDetail> {
+    let head = conn
+        .query_row(
+            "SELECT biz_date, created_at, total_amount_cents, paid_amount_cents, note,
+                    voided_at IS NOT NULL
+               FROM purchases WHERE id = ?1",
+            [id],
+            |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, i64>(2)?,
+                    r.get::<_, i64>(3)?,
+                    r.get::<_, String>(4)?,
+                    r.get::<_, bool>(5)?,
+                ))
+            },
+        )
+        .optional()?;
+
+    let Some((biz_date, created_at, total_cents, paid_cents, note, voided)) = head else {
+        bail!("进货单不存在：{id}");
+    };
+
+    let items = {
+        let mut stmt = conn.prepare(
+            "SELECT pi.product_id, p.name, pi.qty_milli, pi.unit, p.base_unit, p.pack_unit,
+                    pi.unit_cost_base_e4, pi.amount_cents
+               FROM purchase_items pi JOIN products p ON p.id = pi.product_id
+              WHERE pi.purchase_id = ?1 ORDER BY pi.id",
+        )?;
+        let rows = stmt.query_map([id], |r| {
+            let unit: String = r.get(3)?;
+            let base_unit: String = r.get(4)?;
+            let pack_unit: Option<String> = r.get(5)?;
+            // 按录入单位说话 —— 他录的是「3 条」，写「30 包」他对不上自己按的数
+            let unit_label = if unit == "pack" {
+                pack_unit.unwrap_or_else(|| base_unit.clone())
+            } else {
+                base_unit.clone()
+            };
+            Ok(PurchaseLine {
+                product_id: r.get(0)?,
+                name: r.get(1)?,
+                qty_milli: r.get(2)?,
+                unit_label,
+                unit_cost_base_e4: r.get(6)?,
+                base_unit,
+                amount_cents: r.get(7)?,
+            })
+        })?;
+        rows.collect::<rusqlite::Result<_>>()?
+    };
+
+    Ok(PurchaseDetail {
+        id,
+        biz_date,
+        created_at,
+        total_cents,
+        paid_cents,
+        note,
+        voided,
+        items,
+    })
+}
+
+// ─────────────────────────── 某个商品的进货记录 ───────────────────────────
+
+/// 这个商品是哪几次进的。
+///
+/// 老板找一批货是按**商品**找的，不是按单号：「这 4 条中华，2 条 6 月进的、
+/// 2 条 7 月进的」。按单据翻要在几十张单里认哪张含中华，按商品翻一眼就看完。
+pub struct ProductIntake {
+    pub purchase_id: i64,
+    pub biz_date: String,
+    pub time: String,
+    /// 按**录入单位**：他录的是 3 条，这里就是 3 和「条」
+    pub qty_milli: i64,
+    pub unit_label: String,
+    pub unit_cost_base_e4: i64,
+    pub base_unit: String,
+    pub amount_cents: i64,
+    pub voided: bool,
+    /// 这张单里除了它还有别的商品 —— 撤销会把那些一起撤掉，得先说一声
+    pub other_items: i64,
+}
+
+/// 按业务日期倒序。撤过的也列出来，标一下 ——
+/// 凭空消失会让老板以为自己撤错了别的。
+pub fn intake_of(conn: &Connection, product_id: i64, limit: i64) -> Result<Vec<ProductIntake>> {
+    let mut stmt = conn.prepare(
+        "SELECT p.id, p.biz_date, p.created_at, pi.qty_milli, pi.unit,
+                pr.base_unit, pr.pack_unit, pi.unit_cost_base_e4, pi.amount_cents,
+                p.voided_at IS NOT NULL,
+                (SELECT COUNT(*) FROM purchase_items x
+                  WHERE x.purchase_id = p.id AND x.product_id <> pi.product_id)
+           FROM purchase_items pi
+           JOIN purchases p  ON p.id = pi.purchase_id
+           JOIN products  pr ON pr.id = pi.product_id
+          WHERE pi.product_id = ?1
+          ORDER BY p.biz_date DESC, p.id DESC
+          LIMIT ?2",
+    )?;
+    let rows = stmt.query_map(params![product_id, limit], |r| {
+        let unit: String = r.get(4)?;
+        let base_unit: String = r.get(5)?;
+        let pack_unit: Option<String> = r.get(6)?;
+        let unit_label = if unit == "pack" {
+            pack_unit.unwrap_or_else(|| base_unit.clone())
+        } else {
+            base_unit.clone()
+        };
+        Ok(ProductIntake {
+            purchase_id: r.get(0)?,
+            biz_date: r.get(1)?,
+            time: r.get::<_, String>(2)?.chars().skip(11).take(5).collect(),
+            qty_milli: r.get(3)?,
+            unit_label,
+            unit_cost_base_e4: r.get(7)?,
+            base_unit,
+            amount_cents: r.get(8)?,
+            voided: r.get(9)?,
+            other_items: r.get(10)?,
+        })
+    })?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}

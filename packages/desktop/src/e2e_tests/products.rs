@@ -149,3 +149,69 @@ fn 删不存在的商品说得清楚() {
     let mut conn = open_memory().unwrap();
     assert!(err_of(do_remove(&mut conn, 999)).contains("不存在"));
 }
+
+// ═══════════════════ 列表 ═══════════════════
+//
+// 这张列表底下写着「共 N 个商品」。它一旦跟实际对不上，
+// 老板会开始怀疑别的数字 —— 而账本软件最不能丢的就是这个。
+
+use crate::services::products::list;
+
+fn many(conn: &Connection, n: usize) {
+    for i in 0..n {
+        conn.execute(
+            "INSERT INTO products (name, pinyin_abbr, category, base_unit) VALUES (?1, 'x', 'other', '瓶')",
+            [format!("酒{i:03}")],
+        )
+        .unwrap();
+    }
+}
+
+#[test]
+fn 超过五十个也要全列出来() {
+    // 原来两个分支都是 LIMIT 50，第 51 个商品就此在商品页上消失
+    let conn = open_memory().unwrap();
+    many(&conn, 63);
+
+    let (items, total) = list(&conn, "").unwrap();
+    assert_eq!(items.len(), 63, "不能截断");
+    assert_eq!(total, 63);
+}
+
+#[test]
+fn 搜索时总数仍然是全部商品() {
+    // 底下那句「共 N 个商品」不该跟着搜索变 —— 搜出 1 个就写「共 1 个商品」，
+    // 老板会以为商品被搞丢了
+    let conn = open_memory().unwrap();
+    many(&conn, 10);
+    new_product(&conn, "中华(硬)");
+
+    let (items, total) = list(&conn, "中华").unwrap();
+    assert_eq!(items.len(), 1, "搜出来的是筛过的");
+    assert_eq!(total, 11, "总数是全部");
+}
+
+#[test]
+fn 桌子费不算商品() {
+    // 它是随软件装好的服务项目，混进商品列表会让计数无缘无故多一个
+    let conn = open_memory().unwrap();
+    new_product(&conn, "中华(硬)");
+
+    let (items, total) = list(&conn, "").unwrap();
+    assert_eq!((items.len(), total), (1, 1));
+}
+
+#[test]
+fn 停用的商品不在列表里但老账还查得到() {
+    let conn = open_memory().unwrap();
+    let id = new_product(&conn, "中华(硬)");
+    conn.execute("UPDATE products SET is_active = 0 WHERE id = ?1", [id]).unwrap();
+
+    let (items, total) = list(&conn, "").unwrap();
+    assert_eq!((items.len(), total), (0, 0));
+    assert!(
+        conn.query_row("SELECT name FROM products WHERE id = ?1", [id], |r| r.get::<_, String>(0))
+            .is_ok(),
+        "行还在库里，老账指得着"
+    );
+}

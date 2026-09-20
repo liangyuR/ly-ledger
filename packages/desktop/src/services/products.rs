@@ -12,9 +12,47 @@
 //! 而这恰恰是能不能真删的唯一判据。让他选只会选出一个坏结果。
 
 use rusqlite::{Connection, OptionalExtension};
+use serde_json::Value;
 
 use crate::bail;
 use crate::error::Result;
+use crate::sql_json::rows_to_json;
+
+/// 商品列表 + 一共有多少个。
+///
+/// **不截断。** 原来是 `LIMIT 50`：商品过了 50 个，商品页就只显示前 50 行，
+/// 而底下那句「共 N 个商品」数的正是这个截断后的列表 —— 不但少东西，
+/// 连数字都跟着骗人。一家店的商品是几百条量级，全查出来不值得分页。
+///
+/// `total` 单独数：搜索时 items 是筛过的，拿它当总数会写出「共 3 个商品」。
+pub fn list(conn: &Connection, q: &str) -> Result<(Vec<Value>, i64)> {
+    let q = q.trim();
+    let items = if q.is_empty() {
+        let mut stmt = conn.prepare(
+            "SELECT * FROM products WHERE is_active = 1 AND is_service = 0
+              ORDER BY sort_weight DESC, id",
+        )?;
+        rows_to_json(&mut stmt, [])?
+    } else {
+        // 三路匹配：名称包含、全拼前缀、首字母前缀。
+        // 两个拼音字段都要 —— 只做首字母会逼老板记缩写，只做全拼则打字太多
+        let mut stmt = conn.prepare(
+            "SELECT * FROM products
+              WHERE is_active = 1 AND is_service = 0
+                AND (name LIKE ?1 OR pinyin_full LIKE ?2 OR pinyin_abbr LIKE ?2)
+              ORDER BY sort_weight DESC, id",
+        )?;
+        rows_to_json(&mut stmt, rusqlite::params![format!("%{q}%"), format!("{q}%")])?
+    };
+
+    let total: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM products WHERE is_active = 1 AND is_service = 0",
+        [],
+        |r| r.get(0),
+    )?;
+
+    Ok((items, total))
+}
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Removal {

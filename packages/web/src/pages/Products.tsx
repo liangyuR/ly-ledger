@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
 import { api, endpoints, exportXlsx } from '../api/client';
 import type { Product } from '../api/client';
@@ -53,6 +53,39 @@ interface DeleteResult {
 }
 
 const SAMPLE = ['中华(硬) - 条 - 10包', '泸小二 - 瓶', '雪花勇闯 - 箱 - 12瓶'].join('\n');
+
+/** 建一个商品要填的东西。价格选填 —— 卖到时当场填一个，软件会记住 */
+interface Draft {
+  name: string;
+  baseUnit: string;
+  packUnit: string;
+  ratio: string;
+  packPrice: string;
+  basePrice: string;
+}
+
+const EMPTY: Draft = {
+  name: '',
+  baseUnit: '',
+  packUnit: '',
+  ratio: '',
+  packPrice: '',
+  basePrice: '',
+};
+
+/**
+ * 常见的几种卖法，点一下把单位填上。
+ *
+ * 不做成下拉枚举：单位是自由文本，拦了就得为每个新品类改一次代码 ——
+ * 这家店除了烟酒还卖茶叶，论饼论斤论套的都有。这几个只是省打字。
+ */
+const WAYS: { label: string; pack: string; base: string; ratio: string }[] = [
+  { label: '单卖', pack: '', base: '', ratio: '' },
+  { label: '条 → 包', pack: '条', base: '包', ratio: '10' },
+  { label: '条 → 盒', pack: '条', base: '盒', ratio: '10' },
+  { label: '箱 → 瓶', pack: '箱', base: '瓶', ratio: '12' },
+  { label: '箱 → 盒', pack: '箱', base: '盒', ratio: '12' },
+];
 
 /** 可就地编辑的价格格子。批量填价格是启用期最高频的操作，不该逐个进详情页 */
 function PriceCell({
@@ -116,6 +149,10 @@ export default function Products() {
   const [flash, setFlash] = useState<string | null>(null);
   const [doomed, setDoomed] = useState<Product | null>(null);
   const [sheet, setSheet] = useState<SheetPreview | null>(null);
+  const [draft, setDraft] = useState<Draft | null>(null);
+  /** 刚建好那个的名字，连着建几个时给个回声 */
+  const [justMade, setJustMade] = useState<string | null>(null);
+  const nameRef = useRef<HTMLInputElement>(null);
 
   const products = useQuery({ queryKey: ['products', q], queryFn: () => endpoints.products(q) });
   const brands = useQuery({ queryKey: ['seedBrands'], queryFn: endpoints.seedBrands });
@@ -187,6 +224,27 @@ export default function Products() {
     },
   });
 
+  const create = useMutation({
+    mutationFn: (d: Draft) =>
+      api.post<{ productId: number }>('/api/products', {
+        name: d.name.trim(),
+        baseUnit: d.baseUnit.trim(),
+        packUnit: d.packUnit.trim() || undefined,
+        packRatio: d.packUnit.trim() ? Number(d.ratio.trim() || '1') : 1,
+        pricePackYuan: d.packPrice.trim() || undefined,
+        priceBaseYuan: d.basePrice.trim() || undefined,
+      }),
+    onSuccess: (_r, d) => {
+      setJustMade(d.name.trim());
+      // 单位留着、名字和价清掉：一次录十来个同规格的货是常事
+      setDraft({ ...d, name: '', packPrice: '', basePrice: '' });
+      qc.invalidateQueries({ queryKey: ['products'] });
+      qc.invalidateQueries({ queryKey: ['stockOverview'] });
+      nameRef.current?.focus();
+    },
+    onError: (e) => setFlash((e as Error).message),
+  });
+
   const parse = useMutation({
     mutationFn: () => api.post<ParseResult>('/api/products/parse-import', { text }),
     onSuccess: (r) => setPreview(r),
@@ -213,7 +271,22 @@ export default function Products() {
     },
   });
 
+  function submitDraft() {
+    if (!draft) return;
+    if (!draft.name.trim()) {
+      setFlash('先给它起个名字');
+      return;
+    }
+    if (!draft.baseUnit.trim()) {
+      setFlash('按什么卖？填一下单位，比如「瓶」「包」「斤」');
+      return;
+    }
+    setFlash(null);
+    create.mutate(draft);
+  }
+
   const items = products.data?.items ?? [];
+  const total = products.data?.total ?? items.length;
   const missingPrice = items.filter((p) => p.price_base_cents == null && p.price_pack_cents == null).length;
 
   return (
@@ -228,6 +301,17 @@ export default function Products() {
           aria-label="搜商品名或拼音"
           className="h-12 w-72 rounded-[10px] border border-line bg-card px-4 text-[18px]"
         />
+        {/* 建一个商品是这页最直接的动作，摆在最前面 */}
+        <button
+          type="button"
+          onClick={() => {
+            setJustMade(null);
+            setDraft(EMPTY);
+          }}
+          className="h-12 rounded-[10px] bg-brand-700 px-5 text-[17px] font-semibold text-white"
+        >
+          新建商品
+        </button>
         <button
           type="button"
           onClick={() => void exportXlsx('products')}
@@ -295,7 +379,19 @@ export default function Products() {
           </div>
 
           <div className="mt-4 flex shrink-0 items-center gap-4 border-t border-line pt-4 text-[17px] text-ink-2">
-            共 <span className="num">{items.length}</span> 个商品
+            {/* 搜索时列表是筛过的，总数不能拿它来数 —— 搜出 1 个就写「共 1 个商品」，
+                老板会以为商品被搞丢了 */}
+            {q.trim() ? (
+              <>
+                搜到 <span className="num">{items.length}</span> 个
+                <span className="text-muted">·</span>
+                <span className="text-muted">
+                  共 <span className="num">{total}</span> 个商品
+                </span>
+              </>
+            ) : (
+              <>共 <span className="num">{total}</span> 个商品</>
+            )}
             {missingPrice > 0 && (
               <>
                 <span className="text-muted">·</span>
@@ -413,6 +509,146 @@ export default function Products() {
       </div>
 
       {/* 删之前问一句。这是商品页唯一一个会让东西消失的按钮，手滑的代价比多点一下大 */}
+      {/* 建商品：从卖法反推单位。老板想的是「一箱十二瓶」，不是「基础单位/包装单位/换算」 */}
+      <Modal open={!!draft} onClose={() => setDraft(null)} title="新建商品">
+        <label className="mb-1 block text-[16px] text-ink-2">叫什么</label>
+        <input
+          ref={nameRef}
+          autoFocus
+          value={draft?.name ?? ''}
+          onChange={(e) => setDraft((d) => d && { ...d, name: e.target.value })}
+          onKeyDown={(e) => e.key === 'Enter' && submitDraft()}
+          placeholder="中华(硬)"
+          aria-label="商品名"
+          className="h-14 w-full rounded-xl border-2 border-line bg-card px-4 text-[22px]"
+        />
+
+        <div className="mt-5 mb-2 text-[16px] text-ink-2">怎么卖</div>
+        <div className="mb-3 flex flex-wrap gap-2.5">
+          {WAYS.map((w) => {
+            const on =
+              (draft?.packUnit ?? '') === w.pack && (w.pack === '' || (draft?.baseUnit ?? '') === w.base);
+            return (
+              <button
+                key={w.label}
+                type="button"
+                onClick={() =>
+                  setDraft((d) =>
+                    d && {
+                      ...d,
+                      packUnit: w.pack,
+                      ratio: w.ratio,
+                      // 单卖只是把大单位去掉，已经填好的小单位留着
+                      baseUnit: w.base || d.baseUnit,
+                    },
+                  )
+                }
+                className={`h-11 rounded-[10px] border px-4 text-[17px] ${
+                  on ? 'border-brand-700 bg-brand-50 text-brand-900' : 'border-line'
+                }`}
+              >
+                {w.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* 点按钮只是把字填进来，照样能自己改 —— 茶叶论饼论斤，预设里没有 */}
+        {draft?.packUnit.trim() ? (
+          <div className="flex items-center gap-2.5 text-[19px]">
+            1
+            <input
+              value={draft.packUnit}
+              onChange={(e) => setDraft((d) => d && { ...d, packUnit: e.target.value })}
+              aria-label="大单位"
+              className="h-13 w-24 rounded-[10px] border border-line bg-card px-3 text-center text-[19px]"
+            />
+            =
+            <input
+              value={draft.ratio}
+              onChange={(e) => setDraft((d) => d && { ...d, ratio: e.target.value })}
+              aria-label="换算"
+              placeholder="10"
+              className="num h-13 w-24 rounded-[10px] border border-line bg-card px-3 text-center text-[19px]"
+            />
+            <input
+              value={draft.baseUnit}
+              onChange={(e) => setDraft((d) => d && { ...d, baseUnit: e.target.value })}
+              aria-label="小单位"
+              placeholder="包"
+              className="h-13 w-24 rounded-[10px] border border-line bg-card px-3 text-center text-[19px]"
+            />
+          </div>
+        ) : (
+          <div className="flex items-center gap-2.5 text-[19px]">
+            按
+            <input
+              value={draft?.baseUnit ?? ''}
+              onChange={(e) => setDraft((d) => d && { ...d, baseUnit: e.target.value })}
+              aria-label="单位"
+              placeholder="瓶"
+              className="h-13 w-28 rounded-[10px] border border-line bg-card px-3 text-center text-[19px]"
+            />
+            卖
+          </div>
+        )}
+
+        <div className="mt-5 mb-2 text-[16px] text-ink-2">
+          售价<span className="text-muted">（选填，卖到时当场填一个也行）</span>
+        </div>
+        <div className="flex items-end gap-4">
+          {draft?.packUnit.trim() && (
+            <label className="flex flex-col gap-1.5 text-[15px] text-muted">
+              整 {draft.packUnit} 售价
+              <input
+                value={draft.packPrice}
+                onChange={(e) => setDraft((d) => d && { ...d, packPrice: e.target.value })}
+                onKeyDown={(e) => e.key === 'Enter' && submitDraft()}
+                placeholder="0.00"
+                aria-label="整包售价"
+                className="num h-13 w-32 rounded-[10px] border border-line bg-card px-3 text-right text-[19px]"
+              />
+            </label>
+          )}
+          <label className="flex flex-col gap-1.5 text-[15px] text-muted">
+            单 {draft?.baseUnit.trim() || '件'} 售价
+            <input
+              value={draft?.basePrice ?? ''}
+              onChange={(e) => setDraft((d) => d && { ...d, basePrice: e.target.value })}
+              onKeyDown={(e) => e.key === 'Enter' && submitDraft()}
+              placeholder="0.00"
+              aria-label="单件售价"
+              className="num h-13 w-32 rounded-[10px] border border-line bg-card px-3 text-right text-[19px]"
+            />
+          </label>
+        </div>
+
+        {/* 建完不关框：一次录十来个同规格的货是常事，单位留着接着填下一个 */}
+        {justMade && (
+          <div className="mt-5 rounded-xl bg-brand-50 px-5 py-3 text-[17px] text-brand-900">
+            「{justMade}」建好了，接着录下一个
+          </div>
+        )}
+
+        <div className="mt-6 flex justify-end gap-3">
+          <button
+            type="button"
+            onClick={() => setDraft(null)}
+            className="h-13 rounded-[10px] border border-line bg-card px-5 text-[18px]"
+          >
+            {justMade ? '好了' : '不建了'}
+          </button>
+          <button
+            type="button"
+            onClick={submitDraft}
+            disabled={create.isPending}
+            className="h-13 rounded-[10px] bg-brand-700 px-6 text-[18px] font-semibold text-white disabled:opacity-60"
+          >
+            {create.isPending ? '建着…' : '建好'}
+          </button>
+        </div>
+      </Modal>
+
       {/* 这张表能建商品也能改价，导之前必须让他看见会发生什么 */}
       <Modal open={!!sheet} onClose={() => setSheet(null)} title="这张表要写进去">
         <div className="mb-1 num text-[17px] text-ink-2">{sheet?.file}</div>
