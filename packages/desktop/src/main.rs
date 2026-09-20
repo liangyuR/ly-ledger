@@ -39,13 +39,17 @@ fn main() {
             commands::products_list,
             commands::product_create,
             commands::product_update,
+            commands::product_delete,
             commands::products_frequent,
             commands::product_stock,
+            commands::stock_overview,
             // 商品批量导入
             commands::seed_brands,
             commands::seed_import_brands,
             commands::products_parse_import,
             commands::products_import,
+            commands::products_sheet_preview,
+            commands::products_sheet_import,
             // 客户与供应商
             commands::customers_list,
             commands::customer_create,
@@ -58,6 +62,10 @@ fn main() {
             // 单据详情与流水
             commands::sale_detail,
             commands::sales_by_date,
+            commands::purchases_recent,
+            // 服务型收费（桌子费）
+            commands::service_fees_list,
+            commands::service_fees_day,
             // 逆向：作废 / 改单 / 退货
             commands::sale_void,
             commands::sale_revise,
@@ -68,7 +76,12 @@ fn main() {
             commands::customer_rebuild_allocations,
             // 欠款
             commands::customer_debt,
+            commands::customer_statement,
             commands::customers_debts,
+            // 杂项开支
+            commands::expense_add,
+            commands::expense_void,
+            commands::expenses_month,
             // 看板与利润报表
             commands::reports_dashboard,
             commands::reports_profit,

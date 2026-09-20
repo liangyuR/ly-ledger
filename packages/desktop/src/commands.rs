@@ -18,8 +18,10 @@ use crate::money::{
     cents_to_yuan, e4_to_yuan, milli_to_qty, permille_to_percent, yuan_to_cents, Decimalish,
 };
 use crate::services::{
-    backup, excel, onboarding, payments, product_import, profit_reports, purchases,
-    rebuild_allocations, reports, reversals, sale_detail, sales, seed_import,
+    backup, excel, expenses, onboarding, payments, product_import, products, profit_reports,
+    purchases,
+    rebuild_allocations, reports, reversals, sale_detail, sales, seed_import, service_fees,
+    sheet_import,
 };
 use crate::sql_json::rows_to_json;
 use crate::state::AppState;
@@ -36,13 +38,14 @@ pub fn products_list(state: State<'_, AppState>, q: Option<String>) -> Result<Va
         let q = q.as_deref().unwrap_or("").trim().to_string();
         let items = if q.is_empty() {
             let mut stmt = conn.prepare(
-                "SELECT * FROM products WHERE is_active = 1 ORDER BY sort_weight DESC, id LIMIT 50",
+                "SELECT * FROM products WHERE is_active = 1 AND is_service = 0
+                  ORDER BY sort_weight DESC, id LIMIT 50",
             )?;
             rows_to_json(&mut stmt, [])?
         } else {
             let mut stmt = conn.prepare(
                 "SELECT * FROM products
-                  WHERE is_active = 1
+                  WHERE is_active = 1 AND is_service = 0
                     AND (name LIKE ?1 OR pinyin_full LIKE ?2 OR pinyin_abbr LIKE ?2)
                   ORDER BY sort_weight DESC, id
                   LIMIT 50",
@@ -248,6 +251,26 @@ pub fn product_update(state: State<'_, AppState>, id: i64, patch: ProductPatch) 
     })
 }
 
+/// 删商品。录错了、牌子勾多了，得能删掉 —— 否则搜索框里永远飘着个错东西。
+///
+/// 真删还是停用由后端判，判据是「有没有单子指着它」，老板无从知道也不必知道。
+/// 出参里的 `mode` 是给界面用的，界面照着它说人话。
+#[tauri::command]
+pub fn product_delete(state: State<'_, AppState>, id: i64) -> Result<Value> {
+    state.tx(|conn| {
+        let r = products::remove_product(conn, id)?;
+        Ok(match r.outcome {
+            products::Removal::Deleted => json!({
+                "productId": id, "name": r.name, "mode": "deleted",
+            }),
+            products::Removal::Deactivated { purchases, sales } => json!({
+                "productId": id, "name": r.name, "mode": "deactivated",
+                "purchases": purchases, "sales": sales,
+            }),
+        })
+    })
+}
+
 /// 常用商品：近 30 天销量前 12，数字键直选用。
 #[tauri::command]
 pub fn products_frequent(state: State<'_, AppState>) -> Result<Value> {
@@ -261,6 +284,31 @@ pub fn products_frequent(state: State<'_, AppState>) -> Result<Value> {
                 let obj = v.as_object_mut().expect("商品是个对象");
                 obj.insert("priceBase".into(), json!(price_base));
                 obj.insert("pricePack".into(), json!(price_pack));
+                Ok(v)
+            })
+            .collect::<Result<_>>()?;
+        Ok(json!({ "items": items }))
+    })
+}
+
+/// 库存总览：进货页进来先看见的那张表，经常补货的排在最前面。
+///
+/// 200 条够一个店的全部家当了；再多就该用搜索框，滚屏找东西比打字慢。
+#[tauri::command]
+pub fn stock_overview(state: State<'_, AppState>) -> Result<Value> {
+    state.with(|conn| {
+        let items: Vec<Value> = crate::services::inventory::stock_overview(conn, 200)?
+            .into_iter()
+            .map(|l| {
+                let qty = milli_to_qty(l.qty_milli);
+                let avg_cost = e4_to_yuan(l.avg_cost_e4);
+                // 负库存只提醒，不拦路（红线 1）
+                let negative = l.qty_milli < 0;
+                let mut v = serde_json::to_value(l)?;
+                let obj = v.as_object_mut().expect("库存行是个对象");
+                obj.insert("qty".into(), json!(qty));
+                obj.insert("avgCost".into(), json!(avg_cost));
+                obj.insert("negative".into(), json!(negative));
                 Ok(v)
             })
             .collect::<Result<_>>()?;
@@ -328,6 +376,67 @@ pub fn products_import(
 }
 
 // ═══════════════════════ 客户与供应商 ═══════════════════════
+
+/// 选一份改过的商品表，看看导进去会改动什么。**不落库**。
+///
+/// 对话框和解析放在一个命令里：分成「选文件」「再解析」两步的话，
+/// 中间那个路径要在前端存着，他换一份表重选时容易把旧路径导进去。
+///
+/// 声明成 async 是必须的 —— 同步命令跑在主线程，在主线程弹阻塞对话框会锁死界面。
+#[tauri::command]
+pub async fn products_sheet_preview(app: AppHandle, state: State<'_, AppState>) -> Result<Value> {
+    let picked = app
+        .dialog()
+        .file()
+        .add_filter("Excel 表格", &["xlsx", "xls", "xlsm"])
+        .blocking_pick_file();
+
+    // 点了取消 —— 不是错误，别弹红框
+    let Some(path) = picked else {
+        return Ok(json!({ "picked": false }));
+    };
+    let path = path
+        .into_path()
+        .map_err(|e| AppError::new(format!("这个文件读不了：{e}")))?;
+
+    let preview = state.with(|conn| sheet_import::preview(conn, &path))?;
+
+    Ok(json!({
+        "picked": true,
+        "path": path.to_string_lossy(),
+        "file": path.file_name().map(|n| n.to_string_lossy().into_owned()),
+        "create": preview.create,
+        "update": preview.update,
+        "same": preview.same,
+        "bad": preview.bad,
+        // 没变的行不摆出来：一张表里它们占大多数，全列出来会把要看的淹掉
+        "rows": preview.rows.iter()
+            .filter(|r| r.outcome != sheet_import::Outcome::Same)
+            .map(|r| json!({
+                "rowNo": r.row_no,
+                "name": r.name,
+                "outcome": r.outcome.as_str(),
+                "reason": r.reason,
+                "changes": r.changes,
+                "notes": r.notes,
+            }))
+            .collect::<Vec<_>>(),
+    }))
+}
+
+/// 把预览里「新建」和「有变化」的那些行写进去。路径由上一步的预览给出。
+#[tauri::command]
+pub fn products_sheet_import(state: State<'_, AppState>, path: String) -> Result<Value> {
+    state.tx(|conn| {
+        let r = sheet_import::apply(conn, std::path::Path::new(&path))?;
+        Ok(json!({
+            "created": r.created,
+            "updated": r.updated,
+            "same": r.same,
+            "bad": r.bad,
+        }))
+    })
+}
 
 #[tauri::command]
 pub fn customers_list(state: State<'_, AppState>, q: Option<String>) -> Result<Value> {
@@ -540,6 +649,81 @@ pub fn sales_by_date(state: State<'_, AppState>, date: Option<String>) -> Result
     })
 }
 
+/// 最近入库的几单，给进货页认单用 —— 撤销的前提是先找得到那一单。
+#[tauri::command]
+pub fn purchases_recent(state: State<'_, AppState>) -> Result<Value> {
+    state.with(|conn| {
+        let items: Vec<Value> = purchases::recent(conn, 20)?
+            .into_iter()
+            .map(|p| {
+                json!({
+                    "id": p.id,
+                    "bizDate": p.biz_date,
+                    "time": p.time,
+                    "summary": p.summary,
+                    "total": cents_to_yuan(p.total_cents),
+                    "voided": p.voided,
+                })
+            })
+            .collect();
+        Ok(json!({ "items": items }))
+    })
+}
+
+// ═══════════════════════ 服务型收费 ═══════════════════════
+// 桌子费这类。记一笔走的是 sales_checkout，撤一笔走的是 sale_void ——
+// 它本来就是一张销售单，不需要第二套写入口径
+
+/// 有哪些收费项目，各自常收哪几个价。
+#[tauri::command]
+pub fn service_fees_list(state: State<'_, AppState>) -> Result<Value> {
+    state.with(|conn| {
+        let items: Vec<Value> = service_fees::list(conn)?
+            .into_iter()
+            .map(|s| {
+                json!({
+                    "id": s.id,
+                    "name": s.name,
+                    "unit": s.unit,
+                    "commonAmounts": s.common_amounts_cents.iter()
+                        .map(|c| cents_to_yuan(*c)).collect::<Vec<_>>(),
+                })
+            })
+            .collect();
+        Ok(json!({ "items": items }))
+    })
+}
+
+/// 某天收了哪几笔。不传日期就是今天。
+#[tauri::command]
+pub fn service_fees_day(state: State<'_, AppState>, date: Option<String>) -> Result<Value> {
+    state.with(|conn| {
+        let day = match date {
+            Some(d) => d,
+            None => reports::today(conn)?,
+        };
+        let items: Vec<Value> = service_fees::today_fees(conn, &day)?
+            .into_iter()
+            .map(|f| {
+                json!({
+                    "saleId": f.sale_id,
+                    "time": f.time,
+                    "name": f.name,
+                    "amount": cents_to_yuan(f.amount_cents),
+                    "settleType": f.settle_type,
+                    "customerName": f.customer_name,
+                    "voided": f.voided,
+                })
+            })
+            .collect();
+        Ok(json!({
+            "date": day.clone(),
+            "total": cents_to_yuan(service_fees::today_total(conn, &day)?),
+            "items": items,
+        }))
+    })
+}
+
 // ═══════════════════════ 逆向：作废 / 改单 / 退货 ═══════════════════════
 // 界面上老板看到的是「修改」和「退货」，不出现「作废」「红冲」这类会计词汇
 
@@ -650,6 +834,72 @@ pub fn customer_debt(state: State<'_, AppState>, id: i64) -> Result<Value> {
     })
 }
 
+/// 一个客户的往来明细：挂了多少、还了多少、现在剩多少。
+///
+/// 欠款列表只给一个余额。挂 1200 还 500 剩 700，屏幕上只有个 700，
+/// 客户站在柜台前问「我不是还过五百吗」，老板拿不出东西对。
+///
+/// 跟导出的欠款表共用同一个函数，屏幕上和表里必然是同一个数。
+#[tauri::command]
+pub fn customer_statement(state: State<'_, AppState>, id: i64) -> Result<Value> {
+    state.with(|conn| {
+        let found = reports::customer_statements(conn, Some(id))?.into_iter().next();
+
+        let Some(st) = found else {
+            // 建了档还没做过生意：不是错误，给一张空表就行
+            let name: Option<String> = conn
+                .query_row("SELECT name FROM customers WHERE id = ?1", [id], |r| r.get(0))
+                .ok();
+            let Some(name) = name else {
+                bail!("客户不存在：{id}");
+            };
+            let (phone, note): (String, String) = conn
+                .query_row("SELECT phone, note FROM customers WHERE id = ?1", [id], |r| {
+                    Ok((r.get(0)?, r.get(1)?))
+                })
+                .unwrap_or_default();
+            return Ok(json!({
+                "customerId": id, "name": name, "phone": phone, "note": note,
+                "charged": "0.00", "returned": "0.00", "paid": "0.00", "balance": "0.00",
+                "isPrepaid": false, "agingDays": null, "earliestUnpaidDate": null,
+                "entries": [],
+            }));
+        };
+
+        let entries: Vec<Value> = st
+            .entries
+            .iter()
+            .map(|e| {
+                json!({
+                    "bizDate": e.biz_date,
+                    "kind": e.kind,
+                    "ref": e.ref_label,
+                    // 带符号：挂账为正、还款为负
+                    "amount": cents_to_yuan(e.amount_cents),
+                    "balance": cents_to_yuan(e.balance_cents),
+                    "note": e.note,
+                })
+            })
+            .collect();
+
+        Ok(json!({
+            "customerId": st.customer_id,
+            "name": st.name,
+            "phone": st.phone,
+            "note": st.note,
+            "charged": cents_to_yuan(st.charged_cents),
+            "returned": cents_to_yuan(st.returned_cents),
+            "paid": cents_to_yuan(st.paid_cents),
+            // 预收对外显示成正数，前端只管标签不同
+            "balance": cents_to_yuan(st.balance_cents.abs()),
+            "isPrepaid": st.balance_cents < 0,
+            "agingDays": st.aging_days,
+            "earliestUnpaidDate": st.earliest_unpaid_date,
+            "entries": entries,
+        }))
+    })
+}
+
 #[tauri::command]
 pub fn customers_debts(state: State<'_, AppState>) -> Result<Value> {
     state.with(|conn| {
@@ -658,6 +908,8 @@ pub fn customers_debts(state: State<'_, AppState>) -> Result<Value> {
             json!({
                 "customerId": r.customer_id,
                 "name": r.name,
+                // 催账就是打电话，号码得跟名字排在一起
+                "phone": r.phone,
                 // 预收对外显示成正数，前端只管标签不同
                 "amount": cents_to_yuan(r.net_debt_cents.abs()),
                 "earliestUnpaidDate": r.earliest_unpaid_date,
@@ -675,6 +927,57 @@ pub fn customers_debts(state: State<'_, AppState>) -> Result<Value> {
 
 // ═══════════════════════ 看板与利润报表 ═══════════════════════
 // 每个数字都是毛利：售价 − 成本，不含房租水电人工（红线 5）
+
+// ═══════════════════════ 杂项开支 ═══════════════════════
+
+/// 记一笔开支。房租水电这些跟商品无关的钱。
+#[tauri::command]
+pub fn expense_add(state: State<'_, AppState>, input: expenses::NewExpense) -> Result<Value> {
+    state.tx(|conn| {
+        let month = input.biz_date.get(..7).unwrap_or_default().to_string();
+        let id = expenses::add(conn, &input)?;
+        // 顺手把当月合计带回去：记完一笔，老板下一眼看的就是「这个月花了多少」
+        let m = expenses::month(conn, &month)?;
+        Ok(json!({ "expenseId": id, "month": month, "monthTotal": cents_to_yuan(m.total_cents) }))
+    })
+}
+
+/// 作废一笔。不物理删除，留一条痕迹（docs/05）。
+#[tauri::command]
+pub fn expense_void(state: State<'_, AppState>, id: i64) -> Result<Value> {
+    state.tx(|conn| {
+        expenses::void(conn, id)?;
+        Ok(json!({ "expenseId": id }))
+    })
+}
+
+/// 某个月的开支：合计、按名目小计、逐笔明细。不传月份就是本月。
+#[tauri::command]
+pub fn expenses_month(state: State<'_, AppState>, month: Option<String>) -> Result<Value> {
+    state.with(|conn| {
+        let m = match month {
+            Some(m) => m,
+            None => reports::today(conn)?[..7].to_string(),
+        };
+        let data = expenses::month(conn, &m)?;
+        Ok(json!({
+            "month": data.month,
+            "total": cents_to_yuan(data.total_cents),
+            "byCategory": data.by_category.iter().map(|c| json!({
+                "category": c.category,
+                "amount": cents_to_yuan(c.amount_cents),
+                "count": c.count,
+            })).collect::<Vec<_>>(),
+            "items": data.items.iter().map(|i| json!({
+                "id": i.id,
+                "bizDate": i.biz_date,
+                "category": i.category,
+                "amount": cents_to_yuan(i.amount_cents),
+                "note": i.note,
+            })).collect::<Vec<_>>(),
+        }))
+    })
+}
 
 #[tauri::command]
 pub fn reports_dashboard(state: State<'_, AppState>) -> Result<Value> {

@@ -14,7 +14,7 @@ use rust_xlsxwriter::{Format, Workbook};
 use crate::error::Result;
 use crate::money::{milli_to_qty, permille_to_percent};
 use crate::services::profit_reports::{product_ranking, stale_products};
-use crate::services::reports::{list_debts, today};
+use crate::services::reports::{customer_statements, today};
 
 const MONEY: &str = "#,##0.00";
 const MONEY_E4: &str = "#,##0.0000";
@@ -40,45 +40,66 @@ pub struct Export {
     pub bytes: Vec<u8>,
 }
 
-/// 表头 + 列宽 + 若干行 → xlsx 字节。
+/// 工作簿里的一页：页签名 + 表头 + 列宽 + 若干行。
+struct SheetSpec<'a> {
+    name: &'a str,
+    headers: &'a [(&'a str, f64)],
+    rows: &'a [Vec<Cell>],
+}
+
+/// 单页表。页签名留 Excel 默认的，老板打开只看得见一页，名字没有意义。
 fn write_sheet(headers: &[(&str, f64)], rows: &[Vec<Cell>]) -> Result<Vec<u8>> {
+    write_book(&[SheetSpec {
+        name: "Sheet1",
+        headers,
+        rows,
+    }])
+}
+
+/// 多页表 → xlsx 字节。页签有名字，因为要翻页就得知道翻到哪儿。
+fn write_book(specs: &[SheetSpec]) -> Result<Vec<u8>> {
     let mut workbook = Workbook::new();
-    let sheet = workbook.add_worksheet();
 
     let bold = Format::new().set_bold();
     let money = Format::new().set_num_format(MONEY);
     let money_e4 = Format::new().set_num_format(MONEY_E4);
 
-    for (i, (title, width)) in headers.iter().enumerate() {
-        let col = i as u16;
-        sheet.write_string_with_format(0, col, *title, &bold)?;
-        sheet.set_column_width(col, *width)?;
-    }
+    for spec in specs {
+        let SheetSpec { name, headers, rows } = spec;
+        let sheet = workbook.add_worksheet();
+        sheet.set_name(*name)?;
 
-    for (r, row) in rows.iter().enumerate() {
-        let row_idx = r as u32 + 1;
-        for (c, cell) in row.iter().enumerate() {
-            let col = c as u16;
-            match cell {
-                Cell::Text(s) => {
-                    sheet.write_string(row_idx, col, s)?;
+        for (i, (title, width)) in headers.iter().enumerate() {
+            let col = i as u16;
+            sheet.write_string_with_format(0, col, *title, &bold)?;
+            sheet.set_column_width(col, *width)?;
+        }
+
+        for (r, row) in rows.iter().enumerate() {
+            let row_idx = r as u32 + 1;
+            for (c, cell) in row.iter().enumerate() {
+                let col = c as u16;
+                match cell {
+                    Cell::Text(s) => {
+                        sheet.write_string(row_idx, col, s)?;
+                    }
+                    Cell::Money(cents) => {
+                        sheet.write_number_with_format(row_idx, col, *cents as f64 / 100.0, &money)?;
+                    }
+                    Cell::MoneyE4(e4) => {
+                        sheet.write_number_with_format(row_idx, col, *e4 as f64 / 10_000.0, &money_e4)?;
+                    }
+                    Cell::Int(v) => {
+                        sheet.write_number(row_idx, col, *v as f64)?;
+                    }
+                    Cell::Blank => {}
                 }
-                Cell::Money(cents) => {
-                    sheet.write_number_with_format(row_idx, col, *cents as f64 / 100.0, &money)?;
-                }
-                Cell::MoneyE4(e4) => {
-                    sheet.write_number_with_format(row_idx, col, *e4 as f64 / 10_000.0, &money_e4)?;
-                }
-                Cell::Int(v) => {
-                    sheet.write_number(row_idx, col, *v as f64)?;
-                }
-                Cell::Blank => {}
             }
         }
-    }
 
-    // 表头冻在第一行：几百行明细翻到底还看得见列名
-    sheet.set_freeze_panes(1, 0)?;
+        // 表头冻在第一行：几百行明细翻到底还看得见列名
+        sheet.set_freeze_panes(1, 0)?;
+    }
 
     Ok(workbook.save_to_buffer()?)
 }
@@ -154,36 +175,88 @@ pub fn export_sales(conn: &Connection, month: Option<&str>) -> Result<Export> {
     })
 }
 
-/// 欠款表：谁欠多少、账龄、最早一笔。
+/// 欠款表：两页 —— 一页汇总谁欠多少，一页把每一笔挂账和还款摊开。
+///
+/// 只给一个余额是不够的。挂 1200 还 500 剩 700，表上只写 700，
+/// 年底跟单位客户核对时那 1200 和 500 得从哪儿翻出来；
+/// 而且**结清的客户也要留在表里** —— 余额为零不等于这一年没发生过事，
+/// 对账表上少一个人，对面就会问「我那笔呢」。
 pub fn export_debts(conn: &Connection) -> Result<Export> {
-    let d = list_debts(conn, None)?;
+    let statements = customer_statements(conn, None)?;
 
-    let mut rows = Vec::new();
-    for (kind, list) in [("欠款", &d.owing), ("预收", &d.prepaid)] {
-        for r in list {
-            rows.push(vec![
-                Cell::Text(r.name.clone()),
-                Cell::Text(kind.to_string()),
-                Cell::Money(r.net_debt_cents.abs()),
-                match r.aging_days {
-                    Some(v) => Cell::Int(v),
-                    None => Cell::Blank,
-                },
-                text(r.earliest_unpaid_date.clone()),
+    let mut summary = Vec::new();
+    let mut detail = Vec::new();
+
+    for st in &statements {
+        let status = if st.balance_cents > 0 {
+            "欠款"
+        } else if st.balance_cents < 0 {
+            "预收"
+        } else {
+            "已结清"
+        };
+
+        summary.push(vec![
+            Cell::Text(st.name.clone()),
+            Cell::Text(st.phone.clone()),
+            Cell::Text(status.to_string()),
+            Cell::Money(st.charged_cents),
+            Cell::Money(st.returned_cents),
+            Cell::Money(st.paid_cents),
+            Cell::Money(st.balance_cents.abs()),
+            match st.aging_days {
+                Some(v) => Cell::Int(v),
+                None => Cell::Blank,
+            },
+            text(st.earliest_unpaid_date.clone()),
+            Cell::Text(st.note.clone()),
+        ]);
+
+        for e in &st.entries {
+            detail.push(vec![
+                Cell::Text(st.name.clone()),
+                Cell::Text(e.biz_date.clone()),
+                Cell::Text(e.kind.to_string()),
+                Cell::Text(e.ref_label.clone()),
+                // 发生额带符号：挂账为正、还款为负，一列就能求和对上结余
+                Cell::Money(e.amount_cents),
+                Cell::Money(e.balance_cents),
+                Cell::Text(e.note.clone()),
             ]);
         }
     }
 
-    let bytes = write_sheet(
-        &[
-            ("客户", 16.0),
-            ("类型", 8.0),
-            ("金额", 16.0),
-            ("账龄（天）", 12.0),
-            ("最早未结清", 14.0),
-        ],
-        &rows,
-    )?;
+    let bytes = write_book(&[
+        SheetSpec {
+            name: "欠款汇总",
+            headers: &[
+                ("客户", 16.0),
+                ("电话", 15.0),
+                ("状态", 10.0),
+                ("挂账合计", 16.0),
+                ("退货冲抵", 16.0),
+                ("已还合计", 16.0),
+                ("余额", 16.0),
+                ("账龄（天）", 12.0),
+                ("最早未结清", 14.0),
+                ("备注", 20.0),
+            ],
+            rows: &summary,
+        },
+        SheetSpec {
+            name: "往来明细",
+            headers: &[
+                ("客户", 16.0),
+                ("日期", 13.0),
+                ("类型", 10.0),
+                ("单号", 14.0),
+                ("发生额", 16.0),
+                ("结余", 16.0),
+                ("备注", 20.0),
+            ],
+            rows: &detail,
+        },
+    ])?;
 
     Ok(Export {
         filename: format!("欠款表-{}.xlsx", today(conn)?),
@@ -201,7 +274,7 @@ pub fn export_products(conn: &Connection) -> Result<Export> {
                     p.price_pack_cents, p.price_base_cents,
                     COALESCE(i.qty_base_milli, 0), COALESCE(i.avg_cost_base_e4, 0), p.pinyin_abbr
                FROM products p LEFT JOIN inventory i ON i.product_id = p.id
-              WHERE p.is_active = 1
+              WHERE p.is_active = 1 AND p.is_service = 0
               ORDER BY p.brand, p.name",
         )?;
         let mapped = stmt.query_map([], |r| {

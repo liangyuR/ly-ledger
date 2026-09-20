@@ -3,12 +3,15 @@ import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-
 
 import TopBar from './components/TopBar';
 import { useOnboarding } from './hooks/useOnboarding';
+import Backup from './pages/Backup';
 import Collect from './pages/Collect';
 import Dashboard from './pages/Dashboard';
+import Expense from './pages/Expense';
 import Onboarding from './pages/Onboarding';
 import Products from './pages/Products';
 import Purchase from './pages/Purchase';
 import Report from './pages/Report';
+import ServiceFee from './pages/ServiceFee';
 import SaleDetail from './pages/SaleDetail';
 import Sell from './pages/Sell';
 
@@ -46,9 +49,12 @@ export default function App() {
           <Route path="/sell" element={<Sell />} />
           <Route path="/purchase" element={<Purchase />} />
           <Route path="/collect" element={<Collect />} />
+          <Route path="/expense" element={<Expense />} />
+          <Route path="/fee" element={<ServiceFee />} />
           <Route path="/report" element={<Report />} />
           <Route path="/sales/:id" element={<SaleDetail />} />
           <Route path="/products" element={<Products />} />
+          <Route path="/backup" element={<Backup />} />
           <Route path="/onboarding" element={<Onboarding />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

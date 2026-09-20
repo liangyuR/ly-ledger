@@ -216,7 +216,7 @@ mod tests {
         assert_eq!(r.created, expect);
 
         let total: i64 = conn
-            .query_row("SELECT COUNT(*) FROM products", [], |r| r.get(0))
+            .query_row("SELECT COUNT(*) FROM products WHERE is_service = 0", [], |r| r.get(0))
             .unwrap();
         assert_eq!(total as usize, expect, "别的牌子一个都不该进来");
     }

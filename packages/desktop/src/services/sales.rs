@@ -142,6 +142,8 @@ struct Line {
     amount_cents: i64,
     unit_cost_e4: i64,
     cost_cents: i64,
+    /// 服务型收费（桌子费这类）：没有库存也没有进价，成本恒为零、毛利就是全额
+    is_service: bool,
 }
 
 /// 调用方负责开事务（见 `AppState::tx`）。
@@ -178,14 +180,14 @@ pub fn checkout(
     let mut lines = Vec::with_capacity(input.items.len());
 
     for item in &input.items {
-        let pack_ratio: Option<i64> = conn
+        let row: Option<(i64, bool)> = conn
             .query_row(
-                "SELECT pack_ratio FROM products WHERE id = ?1",
+                "SELECT pack_ratio, is_service FROM products WHERE id = ?1",
                 [item.product_id],
-                |r| r.get(0),
+                |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .optional()?;
-        let Some(pack_ratio) = pack_ratio else {
+        let Some((pack_ratio, is_service)) = row else {
             bail!("商品不存在：{}", item.product_id);
         };
 
@@ -201,13 +203,19 @@ pub fn checkout(
         // 成本快照：读**当前**加权成本并就地冻结。
         // 历史单据的成本是既成事实，不是计算结果（红线 3）。
         // 改单重建时用原单快照覆盖，见 CheckoutOptions::cost_override_e4
-        let unit_cost_e4 = match opts
-            .cost_override_e4
-            .as_ref()
-            .and_then(|m| m.get(&item.product_id))
-        {
-            Some(&c) => c,
-            None => read_stock(conn, item.product_id)?.avg_cost_e4,
+        // 服务没有进价，成本就是零 —— 不是「成本未知」。
+        // 走 read_stock 会读到一行空结存，数字上同样是零，但那是碰巧对
+        let unit_cost_e4 = if is_service {
+            0
+        } else {
+            match opts
+                .cost_override_e4
+                .as_ref()
+                .and_then(|m| m.get(&item.product_id))
+            {
+                Some(&c) => c,
+                None => read_stock(conn, item.product_id)?.avg_cost_e4,
+            }
         };
 
         lines.push(Line {
@@ -219,6 +227,7 @@ pub fn checkout(
             amount_cents: line_amount_cents(qty_milli, unit_price_cents)?,
             unit_cost_e4,
             cost_cents: line_cost_cents(qty_base_milli, unit_cost_e4)?,
+            is_service,
         });
     }
 
@@ -267,21 +276,26 @@ pub fn checkout(
             ],
         )?;
 
-        record_movement(
-            conn,
-            MovementInput {
-                biz_date: &input.biz_date,
-                product_id: l.product_id,
-                kind: MovementType::Sale,
-                qty_base_milli: l.qty_base_milli,
-                unit_cost_e4: l.unit_cost_e4,
-                ref_type: "sale",
-                ref_id: sale_id,
-                reverse_of: None,
-            },
-        )?;
+        // 服务不动库存：写了流水，桌子费就会有一个越卖越负的「结存」，
+        // 库存页从此常驻一行「卖超了」，而那一行永远不可能补货补平
+        if !l.is_service {
+            record_movement(
+                conn,
+                MovementInput {
+                    biz_date: &input.biz_date,
+                    product_id: l.product_id,
+                    kind: MovementType::Sale,
+                    qty_base_milli: l.qty_base_milli,
+                    unit_cost_e4: l.unit_cost_e4,
+                    ref_type: "sale",
+                    ref_id: sale_id,
+                    reverse_of: None,
+                },
+            )?;
 
-        write_back_price(conn, l.product_id, l.unit, l.unit_price_cents)?;
+            // 售价也不回写：桌子费今天 200 明天 600，记住上一次等于记错
+            write_back_price(conn, l.product_id, l.unit, l.unit_price_cents)?;
+        }
     }
 
     let mut payment_id = None;

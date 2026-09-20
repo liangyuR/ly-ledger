@@ -4,6 +4,7 @@
  * 老板中途退出向导，进度不能消失，但也不该再霸占整屏。降级成看板顶上
  * 一张卡：做完自动消失，也能主动关掉（docs/04）。
  */
+import { motion } from 'motion/react';
 import { useNavigate } from 'react-router-dom';
 
 import { useDismissOnboarding, useOnboarding, type OnboardingStep } from '../hooks/useOnboarding';
@@ -12,7 +13,12 @@ import { Card } from './Card';
 function Mark({ step }: { step: OnboardingStep }) {
   if (step.done) {
     return (
-      <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-brand-700 text-white">
+      <motion.span
+        initial={{ scale: 0.4, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        transition={{ type: 'spring', stiffness: 500, damping: 22 }}
+        className="flex size-8 shrink-0 items-center justify-center rounded-full bg-brand-700 text-white"
+      >
         <svg
           width="16"
           height="16"
@@ -26,7 +32,7 @@ function Mark({ step }: { step: OnboardingStep }) {
         >
           <path d="M20 6 9 17l-5-5" />
         </svg>
-      </span>
+      </motion.span>
     );
   }
   // 最后一步是"装好了"的标志，圈画成主色，跟可跳过的那步区分开

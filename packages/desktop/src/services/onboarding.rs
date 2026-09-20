@@ -47,11 +47,14 @@ fn count(conn: &Connection, sql: &str) -> Result<i64> {
 }
 
 pub fn onboarding_state(conn: &Connection) -> Result<OnboardingState> {
-    let products = count(conn, "SELECT COUNT(*) FROM products")?;
+    // 一律不数服务型收费：桌子费是随软件装好的，不是老板建的商品。
+    // 数进来，新店一打开就显示「已经有 1 个商品」，fresh 也成了 false —— 向导直接不弹了
+    let products = count(conn, "SELECT COUNT(*) FROM products WHERE is_service = 0")?;
     let priced = count(
         conn,
         "SELECT COUNT(*) FROM products
-          WHERE price_base_cents IS NOT NULL OR price_pack_cents IS NOT NULL",
+          WHERE is_service = 0
+            AND (price_base_cents IS NOT NULL OR price_pack_cents IS NOT NULL)",
     )?;
     let purchases = count(conn, "SELECT COUNT(*) FROM purchases WHERE voided_at IS NULL")?;
     let sales = count(

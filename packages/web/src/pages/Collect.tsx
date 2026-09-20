@@ -1,13 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { motion } from 'motion/react';
 import { useEffect, useRef, useState } from 'react';
 
 import { api, endpoints, exportXlsx } from '../api/client';
 import { Card } from '../components/Card';
+import { Flash } from '../components/Flash';
 import { useHotkeys } from '../hooks/useHotkeys';
+import { rowIn } from '../lib/animations';
 
 interface DebtRow {
   customerId: number;
   name: string;
+  /** 催账要打的那个号码。没填就是空串 */
+  phone: string;
   amount: string;
   earliestUnpaidDate: string | null;
   agingDays: number | null;
@@ -18,6 +23,29 @@ interface DebtList {
   owing: DebtRow[];
   prepaid: DebtRow[];
   totalOwing: string;
+}
+
+interface StatementEntry {
+  bizDate: string;
+  /** 挂账 / 退货 / 还款 / 当场付 */
+  kind: string;
+  ref: string;
+  /** 带符号：挂账为正、还款为负。已经格式化好，前端不做金额运算 */
+  amount: string;
+  balance: string;
+  note: string;
+}
+
+interface Statement {
+  name: string;
+  phone: string;
+  note: string;
+  charged: string;
+  returned: string;
+  paid: string;
+  balance: string;
+  isPrepaid: boolean;
+  entries: StatementEntry[];
 }
 
 const METHODS = [
@@ -46,6 +74,14 @@ export default function Collect() {
 
   const debts = useQuery({ queryKey: ['debts'], queryFn: () => api.get<DebtList>('/api/customers/debts') });
 
+  // 点开一个客户就把他的往来摊开：挂了多少、还了多少、剩多少。
+  // 客户问「我不是还过五百吗」，老板得拿得出东西对
+  const statement = useQuery({
+    queryKey: ['statement', picked?.customerId],
+    queryFn: () => api.get<Statement>(`/api/customers/${picked?.customerId}/statement`),
+    enabled: picked != null,
+  });
+
   const collect = useMutation({
     mutationFn: (body: unknown) => endpoints.collect(body),
     onSuccess: (r) => {
@@ -59,10 +95,17 @@ export default function Collect() {
       setPicked(null);
       setAmount('');
       qc.invalidateQueries({ queryKey: ['debts'] });
+      qc.invalidateQueries({ queryKey: ['statement'] });
       qc.invalidateQueries({ queryKey: ['dashboard'] });
     },
     onError: (e) => setFlash({ tone: 'bad', text: (e as Error).message }),
   });
+
+  function select(c: DebtRow) {
+    setPicked(c);
+    setAmount(c.amount);
+    setFlash(null);
+  }
 
   function submit() {
     if (!picked) {
@@ -118,47 +161,56 @@ export default function Collect() {
             </span>
           </div>
 
-          <div className="flex h-12 items-center gap-4.5 text-[17px] text-ink-2">
-            <span className="w-32">客户</span>
+          <div className="flex h-12 items-center gap-4 text-[17px] text-ink-2">
+            <span className="w-28">客户</span>
+            <span className="w-32">电话</span>
             <span className="w-36 text-right">欠款</span>
             <span className="w-24 text-right">账龄</span>
-            <span className="w-36 text-right">最早一笔</span>
             <span className="grow" />
           </div>
 
           <div className="min-h-0 grow overflow-auto">
             {owing.length === 0 && <div className="pt-4 text-[17px] text-muted">没人欠钱</div>}
-            {owing.map((c) => {
+            {owing.map((c, i) => {
               const on = picked?.customerId === c.customerId;
               const old = (c.agingDays ?? 0) > 30;
               return (
-                <div
+                <motion.div
                   key={c.customerId}
-                  className={`flex h-18 items-center gap-4.5 border-t border-line ${on ? 'bg-brand-50' : ''}`}
+                  {...rowIn(i)}
+                  className={`flex h-18 items-center gap-4 border-t border-line ${on ? 'bg-brand-50' : ''}`}
                 >
-                  <span className="w-32 text-[21px]">{c.name}</span>
-                  <span className="num w-36 text-right text-[28px] font-medium">¥{c.amount}</span>
-                  <span className={`num w-24 text-right text-[18px] ${old ? 'text-danger' : 'text-ink-2'}`}>
-                    {c.agingDays ?? 0} 天
-                  </span>
-                  <span className="num w-36 text-right text-[17px] text-ink-2">
-                    {c.earliestUnpaidDate ?? '—'}
-                  </span>
-                  <span className="grow" />
+                  {/* 整行可点：右边那个按钮只是把「能点」说出来，
+                      老板的手指不会去瞄一个 48px 的按钮 */}
                   <button
                     type="button"
-                    onClick={() => {
-                      setPicked(c);
-                      setAmount(c.amount);
-                      setFlash(null);
-                    }}
-                    className={`h-12 rounded-[10px] border px-6 text-[18px] ${
+                    onClick={() => select(c)}
+                    aria-label={`看${c.name}的往来明细并收款`}
+                    className="flex h-18 grow items-center gap-4 rounded-[10px] text-left hover:bg-brand-50"
+                  >
+                    <span className="w-28 text-[21px]">{c.name}</span>
+                    {/* 催账就是打电话。号码不在名字旁边，老板就得另外翻本子 */}
+                    <span className="num w-32 text-[17px] text-ink-2">{c.phone || '没留号码'}</span>
+                    <span className="num w-36 text-right text-[28px] font-medium">¥{c.amount}</span>
+                    {/* 账龄和「最早一笔是哪天」是同一件事的两种说法，
+                        这一栏只放能直接决定要不要打电话的那个 —— 天数。
+                        具体日期在右边和导出的表里 */}
+                    <span className={`num w-24 text-right text-[18px] ${old ? 'text-danger' : 'text-ink-2'}`}>
+                      {c.agingDays ?? 0} 天
+                    </span>
+                    <span className="grow" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => select(c)}
+                    tabIndex={-1}
+                    className={`h-12 shrink-0 rounded-[10px] border px-6 text-[18px] ${
                       on ? 'border-brand-700 text-brand-900' : 'border-line'
                     }`}
                   >
                     收款
                   </button>
-                </div>
+                </motion.div>
               );
             })}
 
@@ -167,8 +219,9 @@ export default function Collect() {
                 {/* 预收不进催收队列 —— 混进去这个列表就失去可信度 */}
                 <div className="mb-3 text-[17px] text-muted">预收　不进催收队列</div>
                 {prepaid.map((c) => (
-                  <div key={c.customerId} className="flex h-14 items-center gap-4.5 text-muted">
-                    <span className="w-32 text-[20px]">{c.name}</span>
+                  <div key={c.customerId} className="flex h-14 items-center gap-4 text-muted">
+                    <span className="w-28 text-[20px]">{c.name}</span>
+                    <span className="num w-32 text-[16px]">{c.phone || '没留号码'}</span>
                     <span className="num w-36 text-right text-[21px]">预收 ¥{c.amount}</span>
                     <span className="text-[16px]">下次挂账买货自动抵扣</span>
                   </div>
@@ -178,21 +231,39 @@ export default function Collect() {
           </div>
         </Card>
 
-        <Card className="flex min-w-0 grow flex-col">
-          <h2 className="m-0 mb-5 text-[19px] font-semibold">
-            {picked ? `收${picked.name}的钱` : '收款'}
-          </h2>
+        <Card className="flex min-w-0 grow flex-col overflow-hidden">
+          {/* 电话跟标题同一行：这一栏竖着的空间要留给明细，不能被抬头吃掉 */}
+          <div className="mb-5 flex shrink-0 items-baseline gap-4">
+            <h2 className="m-0 text-[19px] font-semibold">
+              {picked ? `收${picked.name}的钱` : '收款'}
+            </h2>
+            {/* 号码取左边那行已经拿到的，不等明细回来 ——
+                否则点下去先闪一下「没留号码」，那是假话 */}
+            {picked && (
+              <span className="num text-[18px] text-ink-2">{picked.phone || '没留号码'}</span>
+            )}
+            {statement.data?.note && (
+              <span className="truncate text-[15px] text-muted">{statement.data.note}</span>
+            )}
+          </div>
 
           {!picked && <div className="text-[17px] text-muted">左边点一个客户</div>}
 
+          {/* 中间这一整块滚，确认收款钉在底下 —— 窗口矮的时候
+              被挤没的必须是明细的下半截，不能是那个按钮 */}
           {picked && (
-            <>
-              <div className="mb-6 rounded-xl bg-page px-5 py-4 text-[19px]">
+            <div className="flex min-h-0 grow flex-col overflow-y-auto">
+              <div className="mb-6 shrink-0 rounded-xl bg-page px-5 py-4 text-[19px]">
                 共欠 <strong className="num text-[23px] text-danger">¥{picked.amount}</strong>
-                {picked.agingDays != null && `　最早一笔 ${picked.agingDays} 天前`}
+                {picked.earliestUnpaidDate && (
+                  <span className="ml-4 text-[17px] text-ink-2">
+                    最早一笔 <span className="num">{picked.earliestUnpaidDate}</span>
+                    {picked.agingDays != null && `（${picked.agingDays} 天前）`}
+                  </span>
+                )}
               </div>
 
-              <label className="flex flex-col gap-2 text-[17px] text-ink-2">
+              <label className="flex shrink-0 flex-col gap-2 text-[17px] text-ink-2">
                 收到多少
                 <input
                   ref={amountRef}
@@ -204,7 +275,7 @@ export default function Collect() {
                 />
               </label>
 
-              <div className="mt-6">
+              <div className="mt-6 shrink-0">
                 <div className="mb-3 text-[17px] text-ink-2">怎么收的</div>
                 <div className="flex gap-2.5">
                   {METHODS.map((m) => (
@@ -221,22 +292,64 @@ export default function Collect() {
                   ))}
                 </div>
               </div>
-            </>
-          )}
 
-          {flash && (
-            <div
-              className={`mt-5 rounded-xl px-5 py-3.5 text-[17px] ${
-                flash.tone === 'ok' ? 'bg-brand-50 text-brand-900' : 'bg-danger-50 text-danger'
-              }`}
-            >
-              {flash.text}
+              {/* 一个滚动区就够：明细整条铺开，跟上面的表单一起滚。
+                  两层滚动条老板分不清在滚哪一个 */}
+              <div className="mt-6 shrink-0">
+                <div className="mb-2.5 flex items-baseline gap-3">
+                  <span className="text-[17px] text-ink-2">往来明细</span>
+                  <span className="num text-[15px] text-muted">
+                    挂账 ¥{statement.data?.charged ?? '0.00'}　已还 ¥{statement.data?.paid ?? '0.00'}
+                    {statement.data && statement.data.returned !== '0.00' &&
+                      `　退货 ¥${statement.data.returned}`}
+                  </span>
+                </div>
+
+                <div className="overflow-hidden rounded-xl border border-line">
+                  {(statement.data?.entries.length ?? 0) === 0 && (
+                    <div className="px-4 py-3 text-[16px] text-muted">
+                      {statement.isPending ? '读取中…' : '这个客户还没有往来记录'}
+                    </div>
+                  )}
+                  {/* 最近的排最上面：先看见「现在欠多少」，
+                      往下翻才是这笔账怎么攒起来的 */}
+                  {[...(statement.data?.entries ?? [])].reverse().map((e, i) => {
+                    const back = e.amount.startsWith('-');
+                    return (
+                      <div
+                        key={`${e.bizDate}-${e.ref}-${i}`}
+                        className="flex h-12 items-center gap-3 border-b border-line px-4 last:border-b-0"
+                      >
+                        <span className="num w-24 text-[15px] text-ink-2">{e.bizDate}</span>
+                        <span className={`w-16 text-[16px] ${back ? 'text-brand-900' : ''}`}>
+                          {e.kind}
+                        </span>
+                        <span className="grow" />
+                        <span
+                          className={`num w-28 text-right text-[18px] font-medium ${
+                            back ? 'text-brand-900' : ''
+                          }`}
+                        >
+                          {back ? `−¥${e.amount.slice(1)}` : `¥${e.amount}`}
+                        </span>
+                        <span className="num w-28 text-right text-[15px] text-muted">
+                          余 ¥{e.balance}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
           )}
 
-          <div className="grow" />
+          <Flash value={flash} className="mt-5 shrink-0" />
 
-          <div className="flex flex-col gap-3">
+          {/* 最近的排在最上面：一屏之内先看见「现在欠多少」，
+              往下翻才是这笔账怎么攒起来的 */}
+          {!picked && <div className="grow" />}
+
+          <div className="mt-5 flex shrink-0 flex-col gap-3">
             <button
               type="button"
               onClick={submit}

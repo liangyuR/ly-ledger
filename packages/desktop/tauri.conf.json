@@ -1,9 +1,9 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "烟酒台账",
+  "productName": "台账",
   "version": "0.1.0",
   "identifier": "com.ly-ledger.desktop",
-  "mainBinaryName": "烟酒台账",
+  "mainBinaryName": "台账",
   "build": {
     "frontendDist": "../web/dist",
     "devUrl": "http://localhost:5173",
@@ -14,7 +14,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "烟酒台账",
+        "title": "台账",
         "width": 1440,
         "height": 900,
         "minWidth": 1100,
