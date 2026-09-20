@@ -376,10 +376,6 @@ export default function Sell() {
     <div className="flex min-h-0 grow flex-col gap-5">
       <FirstSaleHint />
 
-      <div className="flex shrink-0 items-center gap-4">
-        <h1 className="m-0 text-2xl font-semibold">卖货</h1>
-      </div>
-
       <div className="flex min-h-0 grow gap-5">
         {/* 左：搜索与常用商品 */}
         <Card className="flex w-[1140px] shrink-0 flex-col overflow-hidden">

@@ -163,7 +163,6 @@ export default function ServiceFee() {
   return (
     <div className="flex min-h-0 grow flex-col gap-5">
       <div className="flex shrink-0 items-center gap-4">
-        <h1 className="m-0 text-2xl font-semibold">桌子费</h1>
         <span className="text-[17px] text-ink-2">
           跟卖货一样算进营业额，只是没有进价 —— 收多少赚多少
         </span>

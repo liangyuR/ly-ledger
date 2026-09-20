@@ -137,7 +137,6 @@ export default function Collect() {
   return (
     <div className="flex min-h-0 grow flex-col gap-5">
       <div className="flex shrink-0 items-center gap-4">
-        <h1 className="m-0 text-2xl font-semibold">挂账归还</h1>
         <span className="grow" />
         <button
           type="button"

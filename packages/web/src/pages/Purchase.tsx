@@ -336,11 +336,6 @@ export default function Purchase() {
 
   return (
     <div className="flex min-h-0 grow flex-col gap-5">
-      <div className="flex shrink-0 items-center gap-4">
-        <h1 className="m-0 text-2xl font-semibold">库存</h1>
-        <span className="text-[17px] text-ink-2">按最近进货的月份分组，新的在上面</span>
-      </div>
-
       <div className="flex min-h-0 grow gap-5">
         <Card className="flex w-[1140px] shrink-0 flex-col overflow-hidden">
           <label className="mb-3 block text-[17px] text-ink-2">搜商品</label>
@@ -486,7 +481,7 @@ export default function Purchase() {
           {!query.trim() && (
             <div className="mt-5 flex min-h-0 grow flex-col overflow-hidden rounded-xl border border-line">
               <div className="flex h-12 shrink-0 items-center gap-4.5 border-b border-line px-5 text-[16px] text-ink-2">
-                <span className="grow">现有库存　按进货月份分组，同月里常补的在前</span>
+                <span className="grow">现有库存　按进货月份分组，新的月份在上面，同月里常补的在前</span>
                 <span className="num">{stock.data?.items.length ?? 0} 样</span>
               </div>
 

@@ -124,7 +124,6 @@ export default function Expense() {
   return (
     <div className="flex min-h-0 grow flex-col gap-5">
       <div className="flex shrink-0 items-center gap-4">
-        <h1 className="m-0 text-2xl font-semibold">开支</h1>
         <span className="text-[17px] text-ink-2">房租水电这些跟商品无关的钱</span>
         <span className="grow" />
         <div className="flex items-center gap-2">
