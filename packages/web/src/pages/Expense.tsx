@@ -123,36 +123,34 @@ export default function Expense() {
 
   return (
     <div className="flex min-h-0 grow flex-col gap-5">
-      <div className="flex shrink-0 items-center gap-4">
-        <span className="text-[17px] text-ink-2">房租水电这些跟商品无关的钱</span>
-        <span className="grow" />
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setMonth((m) => shiftMonth(m, -1))}
-            aria-label="上个月"
-            className="h-12 w-12 rounded-[10px] border border-line bg-card text-[18px]"
-          >
-            ‹
-          </button>
-          <span className="num w-28 text-center text-[20px]">{month}</span>
-          <button
-            type="button"
-            onClick={() => setMonth((m) => shiftMonth(m, 1))}
-            disabled={month >= thisMonth()}
-            aria-label="下个月"
-            className="h-12 w-12 rounded-[10px] border border-line bg-card text-[18px] disabled:opacity-40"
-          >
-            ›
-          </button>
-        </div>
-      </div>
-
       <div className="flex min-h-0 grow gap-5">
         <Card className="flex grow-[1.45] flex-col overflow-hidden">
-          <div className="mb-4 flex shrink-0 items-baseline">
-            <span className="mr-3.5 text-[18px] text-ink-2">这个月花了</span>
-            <span className="num text-[42px] leading-none font-semibold">¥{d?.total ?? '0.00'}</span>
+          <div className="mb-4 flex shrink-0 items-baseline gap-4">
+            <span className="mr-3.5 shrink-0 text-[18px] whitespace-nowrap text-ink-2">这个月花了</span>
+            <span className="num shrink-0 text-[42px] leading-none font-semibold whitespace-nowrap">
+              ¥{d?.total ?? '0.00'}
+            </span>
+            <span className="grow" />
+            <div className="flex shrink-0 items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setMonth((m) => shiftMonth(m, -1))}
+                aria-label="上个月"
+                className="h-12 w-12 rounded-[10px] border border-line bg-card text-[18px]"
+              >
+                ‹
+              </button>
+              <span className="num w-28 text-center text-[20px]">{month}</span>
+              <button
+                type="button"
+                onClick={() => setMonth((m) => shiftMonth(m, 1))}
+                disabled={month >= thisMonth()}
+                aria-label="下个月"
+                className="h-12 w-12 rounded-[10px] border border-line bg-card text-[18px] disabled:opacity-40"
+              >
+                ›
+              </button>
+            </div>
           </div>
 
           {/* 钱主要去哪儿了 —— 明细一行行看得慢，小计一眼看得完 */}

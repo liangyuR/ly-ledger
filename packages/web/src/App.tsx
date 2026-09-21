@@ -6,7 +6,9 @@ import { useOnboarding } from './hooks/useOnboarding';
 import Backup from './pages/Backup';
 import Collect from './pages/Collect';
 import Dashboard from './pages/Dashboard';
+import Docs from './pages/Docs';
 import Expense from './pages/Expense';
+import IncomeExpense from './pages/IncomeExpense';
 import Onboarding from './pages/Onboarding';
 import Products from './pages/Products';
 import Purchase from './pages/Purchase';
@@ -51,6 +53,10 @@ export default function App() {
           <Route path="/collect" element={<Collect />} />
           <Route path="/expense" element={<Expense />} />
           <Route path="/fee" element={<ServiceFee />} />
+          <Route path="/income-expense" element={<IncomeExpense />} />
+          <Route path="/docs" element={<Docs />} />
+          {/* 不在导航里了，毛利趋势/单品排行/滞销预警先收起来 —— 代码留着，
+              直接访问这个地址还能用，回头要用不用重写 */}
           <Route path="/report" element={<Report />} />
           <Route path="/sales/:id" element={<SaleDetail />} />
           <Route path="/products" element={<Products />} />

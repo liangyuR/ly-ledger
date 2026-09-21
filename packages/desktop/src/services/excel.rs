@@ -13,6 +13,7 @@ use rust_xlsxwriter::{Format, Workbook};
 
 use crate::error::Result;
 use crate::money::{milli_to_qty, permille_to_percent};
+use crate::services::income_expense;
 use crate::services::profit_reports::{product_ranking, stale_products};
 use crate::services::reports::{customer_statements, today};
 
@@ -539,6 +540,122 @@ pub fn export_sales_range(conn: &Connection, from_month: &str, to_month: &str) -
 
     Ok(Export {
         filename: format!("销售明细-{from}至{to}.xlsx"),
+        bytes,
+    })
+}
+
+/// 收支明细：汇总页 + 收入/支出/挂账/挂账收回四页明细，跟屏幕上那页一模一样的口径 ——
+/// 不另写一遍统计逻辑，直接借 `income_expense::month`，屏幕上看见啥，表里就是啥。
+pub fn export_income_expense(conn: &Connection, month: Option<&str>) -> Result<Export> {
+    let m = match month {
+        Some(m) => m.to_string(),
+        None => today(conn)?[..7].to_string(),
+    };
+    let d = income_expense::month(conn, &m)?;
+    let total_income_cents = d.cash_sales_cents + d.credit_collected_cents;
+
+    let summary = vec![
+        vec![Cell::Text("现金收入".to_string()), Cell::Money(d.cash_sales_cents)],
+        vec![Cell::Text("挂账收回".to_string()), Cell::Money(d.credit_collected_cents)],
+        vec![Cell::Text("合计收入".to_string()), Cell::Money(total_income_cents)],
+        vec![Cell::Text("本月新挂账（未计入收入）".to_string()), Cell::Money(d.new_credit_cents)],
+        vec![Cell::Text("开支".to_string()), Cell::Money(d.expenses.total_cents)],
+        vec![
+            Cell::Text("净结余".to_string()),
+            Cell::Money(total_income_cents - d.expenses.total_cents),
+        ],
+    ];
+
+    let income_rows: Vec<Vec<Cell>> = d
+        .income_items
+        .iter()
+        .map(|i| {
+            vec![
+                Cell::Text(i.biz_date.clone()),
+                Cell::Text(i.category.to_string()),
+                Cell::Text(i.name.clone()),
+                Cell::Money(i.amount_cents),
+            ]
+        })
+        .collect();
+
+    let expense_rows: Vec<Vec<Cell>> = d
+        .expenses
+        .items
+        .iter()
+        .map(|i| {
+            vec![
+                Cell::Text(i.biz_date.clone()),
+                Cell::Text(i.category.clone()),
+                Cell::Text(i.note.clone()),
+                Cell::Money(i.amount_cents),
+            ]
+        })
+        .collect();
+
+    let new_credit_rows: Vec<Vec<Cell>> = d
+        .new_credit_items
+        .iter()
+        .map(|r| {
+            vec![
+                Cell::Text(r.biz_date.clone()),
+                Cell::Text(r.customer_name.clone()),
+                Cell::Text(r.summary.clone()),
+                Cell::Money(r.amount_cents),
+            ]
+        })
+        .collect();
+
+    let collected_rows: Vec<Vec<Cell>> = d
+        .collected_items
+        .iter()
+        .map(|r| {
+            vec![
+                Cell::Text(r.biz_date.clone()),
+                Cell::Text(r.customer_name.clone()),
+                Cell::Text(match r.method.as_str() {
+                    "cash" => "现金",
+                    "wechat" => "微信",
+                    "alipay" => "支付宝",
+                    "transfer" => "转账",
+                    _ => "—",
+                }.to_string()),
+                Cell::Money(r.amount_cents),
+                Cell::Text(r.note.clone()),
+            ]
+        })
+        .collect();
+
+    let bytes = write_book(&[
+        SheetSpec {
+            name: "汇总",
+            headers: &[("项目", 26.0), ("金额", 16.0)],
+            rows: &summary,
+        },
+        SheetSpec {
+            name: "收入明细",
+            headers: &[("日期", 13.0), ("类目", 10.0), ("项目", 20.0), ("金额", 14.0)],
+            rows: &income_rows,
+        },
+        SheetSpec {
+            name: "支出明细",
+            headers: &[("日期", 13.0), ("名目", 14.0), ("备注", 22.0), ("金额", 14.0)],
+            rows: &expense_rows,
+        },
+        SheetSpec {
+            name: "挂账明细",
+            headers: &[("日期", 13.0), ("挂谁账上", 14.0), ("项目", 22.0), ("金额", 14.0)],
+            rows: &new_credit_rows,
+        },
+        SheetSpec {
+            name: "挂账收回明细",
+            headers: &[("日期", 13.0), ("谁还的", 14.0), ("怎么结的", 10.0), ("金额", 14.0), ("备注", 20.0)],
+            rows: &collected_rows,
+        },
+    ])?;
+
+    Ok(Export {
+        filename: format!("收支明细-{m}.xlsx"),
         bytes,
     })
 }

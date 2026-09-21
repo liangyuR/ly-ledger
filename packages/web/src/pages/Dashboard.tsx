@@ -174,7 +174,7 @@ export default function Dashboard() {
                 所以得有条出路 —— 那边还能翻到别的日子 */}
             <button
               type="button"
-              onClick={() => navigate(`/report?tab=docs&period=${d?.date ?? ''}`)}
+              onClick={() => navigate(`/docs?period=${d?.date ?? ''}`)}
               className="text-brand-900 underline decoration-dotted underline-offset-4"
             >
               看全部 →

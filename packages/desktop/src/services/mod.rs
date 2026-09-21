@@ -4,6 +4,7 @@ pub mod backup_schedule;
 pub mod cost;
 pub mod excel;
 pub mod expenses;
+pub mod income_expense;
 pub mod inventory;
 pub mod onboarding;
 pub mod payments;

@@ -18,8 +18,8 @@ use crate::money::{
     cents_to_yuan, e4_to_yuan, milli_to_qty, permille_to_percent, yuan_to_cents, Decimalish,
 };
 use crate::services::{
-    backup, excel, expenses, onboarding, payments, product_import, products, profit_reports,
-    purchases,
+    backup, excel, expenses, income_expense, onboarding, payments, product_import, products,
+    profit_reports, purchases,
     rebuild_allocations, redate, reports, reversals, sale_detail, sales, seed_import,
     service_fees,
     sheet_import,
@@ -1082,6 +1082,70 @@ pub fn expenses_month(state: State<'_, AppState>, month: Option<String>) -> Resu
     })
 }
 
+/// 某个月的收支明细：现金收入、挂账收回、开支放在一起看。
+/// 本月新开的挂账单独给一个数 —— 那是应收账款，还没进账，不能算收入。
+#[tauri::command]
+pub fn income_expense_month(state: State<'_, AppState>, month: Option<String>) -> Result<Value> {
+    state.with(|conn| {
+        let m = match month {
+            Some(m) => m,
+            None => reports::today(conn)?[..7].to_string(),
+        };
+        let d = income_expense::month(conn, &m)?;
+        let total_income_cents = d.cash_sales_cents + d.credit_collected_cents;
+        Ok(json!({
+            "month": d.month,
+            "cashSales": cents_to_yuan(d.cash_sales_cents),
+            "creditCollected": cents_to_yuan(d.credit_collected_cents),
+            "totalIncome": cents_to_yuan(total_income_cents),
+            "newCredit": cents_to_yuan(d.new_credit_cents),
+            "expenseTotal": cents_to_yuan(d.expenses.total_cents),
+            "net": cents_to_yuan(total_income_cents - d.expenses.total_cents),
+            "incomeByCategory": d.income_by_category.iter().map(|c| json!({
+                "category": c.category,
+                "amount": cents_to_yuan(c.amount_cents),
+                "amountCents": c.amount_cents,
+                "count": c.count,
+            })).collect::<Vec<_>>(),
+            "incomeItems": d.income_items.iter().map(|i| json!({
+                "id": i.id,
+                "bizDate": i.biz_date,
+                "category": i.category,
+                "name": i.name,
+                "amount": cents_to_yuan(i.amount_cents),
+            })).collect::<Vec<_>>(),
+            "newCreditItems": d.new_credit_items.iter().map(|r| json!({
+                "saleId": r.sale_id,
+                "bizDate": r.biz_date,
+                "customerName": r.customer_name,
+                "summary": r.summary,
+                "amount": cents_to_yuan(r.amount_cents),
+            })).collect::<Vec<_>>(),
+            "expenseByCategory": d.expenses.by_category.iter().map(|c| json!({
+                "category": c.category,
+                "amount": cents_to_yuan(c.amount_cents),
+                "amountCents": c.amount_cents,
+                "count": c.count,
+            })).collect::<Vec<_>>(),
+            "expenseItems": d.expenses.items.iter().map(|i| json!({
+                "id": i.id,
+                "bizDate": i.biz_date,
+                "category": i.category,
+                "amount": cents_to_yuan(i.amount_cents),
+                "note": i.note,
+            })).collect::<Vec<_>>(),
+            "collectedItems": d.collected_items.iter().map(|r| json!({
+                "id": r.id,
+                "bizDate": r.biz_date,
+                "customerName": r.customer_name,
+                "amount": cents_to_yuan(r.amount_cents),
+                "method": r.method,
+                "note": r.note,
+            })).collect::<Vec<_>>(),
+        }))
+    })
+}
+
 #[tauri::command]
 pub fn reports_dashboard(state: State<'_, AppState>) -> Result<Value> {
     state.with(|conn| {
@@ -1370,6 +1434,16 @@ pub async fn export_stale(app: AppHandle, state: State<'_, AppState>) -> Result<
 #[tauri::command]
 pub async fn export_debts(app: AppHandle, state: State<'_, AppState>) -> Result<Value> {
     let export = state.with(|conn| excel::export_debts(conn))?;
+    save_export(&app, export)
+}
+
+#[tauri::command]
+pub async fn export_income_expense(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    month: Option<String>,
+) -> Result<Value> {
+    let export = state.with(|conn| excel::export_income_expense(conn, month.as_deref()))?;
     save_export(&app, export)
 }
 

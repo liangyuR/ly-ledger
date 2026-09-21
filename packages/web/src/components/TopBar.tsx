@@ -29,7 +29,8 @@ const NAV: { to: string; key?: string; label: string }[] = [
   { to: '/expense', key: 'F4', label: '开支' },
   // 桌子费不给功能键：F7 / F9 在卖货页已经是部分付和挂账，全局再绑一个会两个一起触发
   { to: '/fee', label: '桌子费' },
-  { to: '/report', key: 'F5', label: '报表' },
+  { to: '/docs', key: 'F5', label: '单据' },
+  { to: '/income-expense', label: '收支明细' },
   { to: '/products', key: 'F6', label: '商品' },
   // 不常用，但出事那天要找得到 —— 所以留在导航里，不塞进设置
   { to: '/backup', label: '备份' },

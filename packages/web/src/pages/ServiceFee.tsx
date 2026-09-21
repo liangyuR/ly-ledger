@@ -67,7 +67,7 @@ export default function ServiceFee() {
   const qc = useQueryClient();
   // 看哪一段（一天 2026-09-20 或一个月 2026-09）和记在哪天是两件事：
   // 翻上个月的账时，新收的这笔还是该记在今天
-  const [period, setPeriod] = useState<string>(today);
+  const [period, setPeriod] = useState<string>(() => today().slice(0, 7));
   const [bizDate, setBizDate] = useState(today);
   const month = period.length === 7;
   const [picked, setPicked] = useState<number | null>(null);
@@ -162,28 +162,23 @@ export default function ServiceFee() {
 
   return (
     <div className="flex min-h-0 grow flex-col gap-5">
-      <div className="flex shrink-0 items-center gap-4">
-        <span className="text-[17px] text-ink-2">
-          跟卖货一样算进营业额，只是没有进价 —— 收多少赚多少
-        </span>
-      </div>
-
       <div className="flex min-h-0 grow gap-5">
         <Card className="flex grow-[1.45] flex-col overflow-hidden">
-          <div className="mb-4 flex shrink-0 items-baseline">
-            <span className="mr-3.5 text-[18px] text-ink-2">{month ? '这个月收了' : '这天收了'}</span>
-            <span className="num text-[42px] leading-none font-semibold">
+          {/* 按天是「今天收了多少」，按月是「这个月桌子费收了多少」—— 月底真会问。
+              总额和翻页并成一行，跟开支页一个风格 —— 两行各占一段视线，
+              一行扫过去更快 */}
+          <div className="mb-4 flex shrink-0 items-center gap-4">
+            <span className="mr-3.5 shrink-0 text-[18px] whitespace-nowrap text-ink-2">
+              {month ? '这个月收了' : '这天收了'}
+            </span>
+            <span className="num shrink-0 text-[42px] leading-none font-semibold whitespace-nowrap">
               ¥{day.data?.total ?? '0.00'}
             </span>
-            <span className="grow" />
-            <span className="num text-[17px] text-muted">
+            <span className="num shrink-0 text-[17px] whitespace-nowrap text-muted">
               {rows.filter((r) => !r.voided).length} 笔
             </span>
-          </div>
-
-          {/* 按天是「今天收了多少」，按月是「这个月桌子费收了多少」—— 月底真会问 */}
-          <div className="mb-4 flex shrink-0 items-center gap-2.5">
-            <div className="mr-1.5 flex gap-1.5">
+            <span className="grow" />
+            <div className="mr-1.5 flex shrink-0 gap-1.5">
               {(['按天', '按月'] as const).map((label) => (
                 <button
                   key={label}
@@ -296,10 +291,6 @@ export default function ServiceFee() {
                 )}
               </div>
             ))}
-          </div>
-
-          <div className="mt-4 shrink-0 border-t border-line pt-4 text-[16px] text-muted">
-            撤掉的那笔不从库里删，只是不再算进收入 —— 跟卖货单一个规矩
           </div>
         </Card>
 

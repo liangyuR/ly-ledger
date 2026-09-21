@@ -128,6 +128,10 @@ function route(method: Method, path: string, body?: unknown): [string, Args] {
       if (second === 'profit') return ['reports_profit', { month: query.get('month') ?? undefined }];
       break;
 
+    case 'income-expense':
+      if (method === 'GET') return ['income_expense_month', { month: query.get('month') ?? undefined }];
+      break;
+
     case 'onboarding':
       if (method === 'GET') return ['onboarding_state', {}];
       if (second === 'dismiss') return ['onboarding_dismiss', b];
@@ -170,7 +174,14 @@ export const api = {
 // 「下载」文件夹。现在弹系统的保存对话框，老板自己选存哪儿 ——
 // 一份要发给会计的表，存完找不着才是真问题。
 
-export type ExportKind = 'sales' | 'sales_range' | 'ranking' | 'stale' | 'debts' | 'products';
+export type ExportKind =
+  | 'sales'
+  | 'sales_range'
+  | 'ranking'
+  | 'stale'
+  | 'debts'
+  | 'products'
+  | 'income_expense';
 
 export interface ExportResult {
   /** false = 老板点了取消。这不是错误，别弹红框 */

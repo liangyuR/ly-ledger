@@ -89,6 +89,8 @@ fn main() {
             commands::expense_void,
             commands::expense_update,
             commands::expenses_month,
+            // 收支明细
+            commands::income_expense_month,
             // 看板与利润报表
             commands::reports_dashboard,
             commands::reports_profit,
@@ -108,6 +110,7 @@ fn main() {
             commands::export_ranking,
             commands::export_stale,
             commands::export_debts,
+            commands::export_income_expense,
             commands::export_products,
             // 自检
             commands::health,
