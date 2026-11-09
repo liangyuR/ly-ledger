@@ -16,6 +16,7 @@ import Report from './pages/Report';
 import ServiceFee from './pages/ServiceFee';
 import SaleDetail from './pages/SaleDetail';
 import Sell from './pages/Sell';
+import SalesSummary from './pages/SalesSummary';
 
 /**
  * 全新的库自动进向导。
@@ -49,6 +50,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/sell" element={<Sell />} />
+          <Route path="/sell/summary" element={<SalesSummary />} />
           <Route path="/purchase" element={<Purchase />} />
           <Route path="/collect" element={<Collect />} />
           <Route path="/expense" element={<Expense />} />

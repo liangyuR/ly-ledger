@@ -94,6 +94,7 @@ fn main() {
             // 看板与利润报表
             commands::reports_dashboard,
             commands::reports_profit,
+            commands::sales_summary_month,
             // 启用向导
             commands::onboarding_state,
             commands::onboarding_dismiss,
