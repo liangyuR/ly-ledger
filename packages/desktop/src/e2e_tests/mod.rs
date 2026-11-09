@@ -115,6 +115,7 @@ mod pricing;
 mod products;
 mod redate;
 mod reports;
+mod sales_summary;
 mod service_fees;
 mod statements;
 mod stock;

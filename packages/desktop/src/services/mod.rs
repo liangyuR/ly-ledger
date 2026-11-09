@@ -19,6 +19,7 @@ pub mod reports;
 pub mod reversals;
 pub mod sale_detail;
 pub mod sales;
+pub mod sales_summary;
 pub mod seed_import;
 pub mod service_fees;
 pub mod settings;

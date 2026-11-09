@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 
 import { api, endpoints, type Product } from '../api/client';
 import FirstSaleHint from '../components/FirstSaleHint';
@@ -375,6 +376,11 @@ export default function Sell() {
   return (
     <div className="flex min-h-0 grow flex-col gap-5">
       <FirstSaleHint />
+
+      <div className="flex shrink-0 items-center justify-between">
+        <h1 className="m-0 text-2xl font-semibold">卖货</h1>
+        <Link to="/sell/summary" className="rounded-[10px] border border-line bg-card px-5 py-3 text-[18px] text-brand-900 hover:bg-brand-50">查看卖货汇总</Link>
+      </div>
 
       <div className="flex min-h-0 grow gap-5">
         {/* 左：搜索与常用商品 */}

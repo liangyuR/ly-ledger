@@ -1147,6 +1147,17 @@ pub fn income_expense_month(state: State<'_, AppState>, month: Option<String>) -
 }
 
 #[tauri::command]
+pub fn sales_summary_month(state: State<'_, AppState>, month: Option<String>) -> Result<Value> {
+    state.with(|conn| {
+        let month = match month {
+            Some(m) => m,
+            None => reports::today(conn)?[..7].to_string(),
+        };
+        Ok(serde_json::to_value(crate::services::sales_summary::month(conn, &month)?)?)
+    })
+}
+
+#[tauri::command]
 pub fn reports_dashboard(state: State<'_, AppState>) -> Result<Value> {
     state.with(|conn| {
         let d = reports::dashboard(conn)?;

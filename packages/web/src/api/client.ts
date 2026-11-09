@@ -124,6 +124,7 @@ function route(method: Method, path: string, body?: unknown): [string, Args] {
       break;
 
     case 'reports':
+      if (method === 'GET' && second === 'sales-summary') return ['sales_summary_month', { month: query.get('month') ?? undefined }];
       if (second === 'dashboard') return ['reports_dashboard', {}];
       if (second === 'profit') return ['reports_profit', { month: query.get('month') ?? undefined }];
       break;
